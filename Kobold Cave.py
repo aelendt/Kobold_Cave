@@ -62,7 +62,6 @@ beastiary = {
 
 def path_selector():
     print('As you venture into the cavern the light from the entrance fades from view. In front of you is 3 branching paths.')
-    path_roll = random.randint(1, 30)
     input('[Left / Middle / Right] ').lower()
     input('[]')
 
@@ -242,92 +241,110 @@ def encounter(monster_name, character: dict):
 
     # combat module
     while character['health'] > 0:
-        if (beastiary[current_encounter]['health']) > 0:
-            player_dodge_chance = character['dodge'] + random.randint(-2, 3)
-            monster_damage_roll = random.randint(-3, 3)
-            player_damage_roll = random.randint(-2, 2)
-            print('')
-            print('You have encountered a ' + str(beastiary[current_encounter]['pretty_name']) + '. What will you do?')
-            if character['job'] == 'warrior':
-                action = input('[Attack / Defend] ').lower()
-            elif character['job'] == 'rogue':
-                action = input('[Attack / Defend / Flee] ').lower()
-            elif character['job'] == 'wizard':
-                action = input('[Attack / Defend / Cast: Fireball] ').lower()
-            print('')
-            if action == 'attack':
-                print('Damage Roll: ' + str(player_damage_roll))
-                if player_dodge_chance < 4:
-                    character['health'] = character['health'] - (
-                            beastiary[current_encounter]['attack'] + monster_damage_roll)
-                    (beastiary[current_encounter]['health']) = (beastiary[current_encounter]['health']) - (
-                            int(character['attack']) + player_damage_roll)
-                    print('You strike the kobold dealing ' + str(
-                        character['attack'] + player_damage_roll) + ' damage.')
-                    print('You are struck for ' + str(
-                        beastiary[current_encounter]['attack'] + monster_damage_roll) + ' damage.')
-                    print('Hero Current HP: ' + str(character['health']))
-                    print('       Enemy HP: ' + str(beastiary[current_encounter]['health']))
+        if (beastiary['kobold_miner']) == True:
+            if beastiary['kobold_miner']['Health'] > 0:
+                player_dodge_chance = character['dodge'] + random.randint(-2, 3)
+                monster_damage_roll = random.randint(-3, 3)
+                print('')
+                print('You have encountered a ' + str(beastiary[current_encounter]['pretty_name']) + '. What will you do?')
+                if character['job'] == 'warrior':
+                    action = input('[Attack / Defend] ').lower()
+                elif character['job'] == 'rogue':
+                    action = input('[Attack / Defend / Flee] ').lower()
+                elif character['job'] == 'wizard':
+                    action = input('[Attack / Defend / Cast: Fireball] ').lower()
+                print('')
+                if action == 'attack':
+                    player_damage_roll = random.randint(-2, 2)
+                    print('Damage Roll: ' + str(player_damage_roll))
+                    if player_dodge_chance < 4:
+                        character['health'] = character['health'] - (
+                                beastiary[current_encounter]['attack'] + monster_damage_roll)
+                        (beastiary[current_encounter]['health']) = (beastiary[current_encounter]['health']) - (int(character['attack']) + player_damage_roll)
+                        print('You strike the kobold dealing ' + str(character['attack'] + player_damage_roll) + ' damage.')
+                        print('You are struck for ' + str(beastiary[current_encounter]['attack'] + monster_damage_roll) + ' damage.')
+                        print('Hero Current HP: ' + str(character['health']))
+                        print('       Enemy HP: ' + str(beastiary[current_encounter]['health']))
+                        continue
+                    elif player_dodge_chance >= 4:
+                        (beastiary[current_encounter]['health']) = (beastiary[current_encounter]['health']) - (character['attack'] + player_damage_roll)
+                        print('You strike the kobold dealing ' + str(character['attack'] + player_damage_roll) + ' damage.')
+                        print('Hero Current HP: ' + str(character['health']))
+                        print('       Enemy HP: ' + str(beastiary[current_encounter]['health']))
+                        continue
+                elif action == 'defend':
+                    defend_roll = random.randint(1, 10)
+                    counter_atk_roll = random.randint(-3, 0)
+                    print('Defend Roll: ' + str(defend_roll))
+                    if defend_roll in range(1, 6):
+                        print("You parry the enemy's blow.")
+                        print('Hero Current HP: ' + str(character['health']))
+                        print('       Enemy HP: ' + str(beastiary[current_encounter]['health']))
+                        continue
+                    elif defend_roll in range(6, 10):
+                        print('You parry the enemy attack and stagger the enemy. Taking advantage of the situation you manage a counterattack.')
+                        final_dmg_roll = round(((int(character['attack'])/2) + counter_atk_roll))
+                        print('Final DMG Roll: ' + str(final_dmg_roll))
+                        (beastiary[current_encounter]['health']) = (beastiary[current_encounter]['health']) - final_dmg_roll
+                        print('You strike the kobold dealing ' + str(final_dmg_roll) + ' damage.')
+                        print('Hero Current HP: ' + str(character['health']))
+                        print('       Enemy HP: ' + str(beastiary[current_encounter]['health']))
+                        continue
+                    elif defend_roll == 10:
+                        print('You fail to defend against the enemy attack')
+                        character['health'] = character['health'] - (beastiary[current_encounter]['attack'] + monster_damage_roll)
+                        print('Hero Current HP: ' + str(character['health']))
+                        print('       Enemy HP: ' + str(beastiary[current_encounter]['health']))
+                        continue
+                elif action == 'flee':
+                    flee_chance = random.randint(1, 5)
+                    if flee_chance >= 4:
+                        print('You get away from the kobold.')
+                        break
+                    elif flee_chance < 4:
+                        print('You fail to escape the kobold, and receive a blow to the head from his fist.')
+                        character['health'] = character['health'] - (
+                                beastiary[current_encounter]['attack'] + monster_damage_roll)
+                        print('Hero Current HP: ' + str(character['health']))
+                        print('       Enemy HP: ' + str(beastiary[current_encounter]['health']))
+                        continue
+                elif action == 'cast: fireball':
+                    misfire_chance = random.randint(1, 10)
+                    print('misfire_chance:' + str(misfire_chance))
+                    if misfire_chance <= 3:
+                        character['health'] = character['health'] - (character['special_atk'][1] / 2)
+                        print('CRITICAL FAIL: Fireball Misfire')
+                        print('Hero Current HP: ' + str(character['health']))
+                        print('       Enemy HP: ' + str(beastiary[current_encounter]['health']))
+                    elif misfire_chance in range(4, 6):
+                        print('Your fireball passes harmlessly over the kobolds head.')
+                        character['health'] = character['health'] - (
+                                beastiary[current_encounter]['attack'] + monster_damage_roll)
+                        print('You are struck dealing ' + str(
+                            beastiary[current_encounter]['attack'] + monster_damage_roll) + ' damage.')
+                        print('Hero Current HP: ' + str(character['health']))
+                        print('       Enemy HP: ' + str(beastiary[current_encounter]['health']))
+                    elif misfire_chance > 5:
+                        print('Your fireball hits the kobold square in the chest. The enemy is staggered.')
+                        (beastiary[current_encounter]['health']) = (beastiary[current_encounter]['health']) - \
+                                                                character['special_atk'][1]
+                        print('Hero Current HP: ' + str(character['health']))
+                        print('       Enemy HP: ' + str(beastiary[current_encounter]['health']))
                     continue
-                elif player_dodge_chance >= 4:
-                    (beastiary[current_encounter]['health']) = (beastiary[current_encounter]['health']) - (
-                            character['attack'] + player_damage_roll)
-                    print('You strike the kobold dealing ' + str(
-                        character['attack'] + player_damage_roll) + ' damage.')
-                    print('Hero Current HP: ' + str(character['health']))
-                    print('       Enemy HP: ' + str(beastiary[current_encounter]['health']))
+                else:
+                    print('Please select a valid action.')
                     continue
-            elif action == 'defend':
-                print("You parry the enemy's blow.")
-                print('Hero Current HP: ' + str(character['health']))
-                print('       Enemy HP: ' + str(beastiary[current_encounter]['health']))
-                continue
-            elif action == 'flee':
-                flee_chance = random.randint(1, 5)
-                if flee_chance >= 4:
-                    print('You get away from the kobold.')
-                    break
-                elif flee_chance < 4:
-                    print('You fail to escape the kobold, and receive a blow to the head from his fist.')
-                    character['health'] = character['health'] - (
-                            beastiary[current_encounter]['attack'] + monster_damage_roll)
-                    print('Hero Current HP: ' + str(character['health']))
-                    print('       Enemy HP: ' + str(beastiary[current_encounter]['health']))
-                    continue
-            elif action == 'cast: fireball':
-                misfire_chance = random.randint(1, 10)
-                print('misfire_chance:' + str(misfire_chance))
-                if misfire_chance <= 3:
-                    character['health'] = character['health'] - (character['special_atk'][1] / 2)
-                    print('CRITICAL FAIL: Fireball Misfire')
-                    print('Hero Current HP: ' + str(character['health']))
-                    print('       Enemy HP: ' + str(beastiary[current_encounter]['health']))
-                elif misfire_chance in range(4, 6):
-                    print('Your fireball passes harmlessly over the kobolds head.')
-                    character['health'] = character['health'] - (
-                            beastiary[current_encounter]['attack'] + monster_damage_roll)
-                    print('You are struck dealing ' + str(
-                        beastiary[current_encounter]['attack'] + monster_damage_roll) + ' damage.')
-                    print('Hero Current HP: ' + str(character['health']))
-                    print('       Enemy HP: ' + str(beastiary[current_encounter]['health']))
-                elif misfire_chance > 5:
-                    print('Your fireball hits the kobold square in the chest. The enemy is staggered.')
-                    (beastiary[current_encounter]['health']) = (beastiary[current_encounter]['health']) - \
-                                                               character['special_atk'][1]
-                    print('Hero Current HP: ' + str(character['health']))
-                    print('       Enemy HP: ' + str(beastiary[current_encounter]['health']))
-                continue
-            else:
-                print('Please select a valid action.')
-                continue
-        elif int(beastiary[current_encounter]['health']) <= 0:
-            character['cs'] = character['cs'] + 1
-            print('Your enemy has fallen. You may move on.')
-            print('Creep Score: ' + str(character['cs']))
-            loot_table(character)
-            print('-----------------------------------------------------')
-            break
-    if character['health'] <= 0:
+            elif int(beastiary['kobold_miner']['health']) <= 0:
+                character['cs'] = character['cs'] + 1
+                print('Your enemy has fallen. You may move on.')
+                print('Creep Score: ' + str(character['cs']))
+                loot_table(character)
+                print('-----------------------------------------------------')
+                break
+        elif (beastiary['kobold_guard']) == True:
+        elif (beastiary['kobold_heavy']) == True:
+        elif (beastiary['kobold_leader']) == True:
+    while character['health'] <= 0:
         print('You have fallen during the encounter. GAME OVER')
 
     print('Combat Module Resolved')  # module checker
