@@ -94,7 +94,7 @@ function fighter({ spriteName, title, subtitle, health, maxHealth, mana, maxMana
   return figure;
 }
 
-function partySide({ party, active, bandages, bag = [] }, scene) {
+function partySide({ party, active }, scene) {
   const side = element('div', `side party size-${party.length}`);
   party.forEach((member, i) => {
     side.append(fighter({
@@ -113,11 +113,6 @@ function partySide({ party, active, bandages, bag = [] }, scene) {
   });
   previous.party = Object.fromEntries(party.map(member => [member.name, member.health]));
   if (scene === 'victory') side.classList.add('triumph');
-  if (bandages !== undefined) {
-    const supplies = element('div', 'supplies', `Bandages: ${bandages} · Bag: ${bag.length}`);
-    if (bag.length) supplies.title = bag.join(', ');
-    side.append(supplies);
-  }
   return side;
 }
 
@@ -130,7 +125,7 @@ function enemySide(enemy, scene) {
       subtitle: enemy.boss ? 'Master of the mines' : 'Kobold',
       health: enemy.health,
       maxHealth: enemy.max_health,
-      before: previous.enemy,
+      before: previous.enemy ?? undefined,  // no previous health: a new enemy, nothing to animate
       boss: enemy.boss,
       effects: enemy.effects,
     }));
@@ -212,6 +207,54 @@ function recruitCards({ prisoners, boon, abilities }, pick) {
   return grid;
 }
 
+function spoilsCard(spoils) {
+  const card = element('div', 'side venue-notes');
+  card.append(element('div', 'who', `${spoils.monster} defeated`));
+  const list = element('ul', 'spoils');
+  const add = (text, cls = '') => list.append(element('li', cls, text));
+  add(`+${spoils.xp} XP`);
+  spoils.levelled.forEach(line => add(line, 'gain'));
+  if (spoils.gold) add(`+${spoils.gold} gold`, 'gold');
+  add(`Loot: ${spoils.found}`, spoils.found === 'Nothing of worth' ? '' : 'loot');
+  if (spoils.bandages) add(`+${spoils.bandages} bandage${spoils.bandages > 1 ? 's' : ''}`);
+  const rested = Object.entries(spoils.healing).filter(([, hp]) => hp > 0)
+    .map(([name, hp]) => `${name} +${hp}`);
+  if (rested.length) add(`Rested: ${rested.join(', ')} HP`);
+  card.append(list);
+  return card;
+}
+
+function forkCards(pick) {
+  const grid = element('div', 'jobs');
+  [['anvil', 'Forge', 'Break old gear into scrap. Spend scrap to reforge equipped gear, up to +3.'],
+   ['trader', 'Trader', 'Spend gold on bandages, vials, trinkets and skill tomes. Sell old gear.'],
+   ['tunnel', 'Tunnel', 'A forgotten cache of gold and loot. Or an ambush.']]
+    .forEach(([spriteName, title, text], i) => grid.append(
+      choiceCard(spriteName, i + 1, title, [[text]], () => pick(title))));
+  return grid;
+}
+
+function venue(spriteName, title, purse, sections) {
+  const box = element('div', 'venue');
+  const portrait = element('div', 'portrait');
+  portrait.append(sprite(spriteName));
+  const body = element('div', 'venue-notes');
+  body.append(element('div', 'who', title), element('div', 'gold', purse));
+  sections.forEach(([heading, rows]) => {
+    if (!rows.length) return;
+    body.append(element('div', 'what venue-heading', heading));
+    const list = element('ul', 'spoils');
+    rows.forEach(([main, note]) => {
+      const row = element('li', '', main);
+      if (note) row.append(element('span', 'what', ` ${note}`));
+      list.append(row);
+    });
+    body.append(list);
+  });
+  box.append(portrait, body);
+  return box;
+}
+
 export function showScene(scene, details, { pick }) {
   panel.hidden = false;
   panel.dataset.scene = scene;
@@ -226,6 +269,33 @@ export function showScene(scene, details, { pick }) {
   }
   if (scene === 'recruit') {
     panel.replaceChildren(recruitCards(details, pick));
+    return;
+  }
+  if (scene === 'fork') {
+    panel.replaceChildren(forkCards(pick));
+    return;
+  }
+  if (scene === 'forge') {
+    const { scrap, salvage, reforge } = details.forge;
+    panel.replaceChildren(venue('anvil', 'The Forge', `Scrap: ${scrap}`, [
+      ['Salvage from the bag', salvage.map(item => [item.name, `${item.scrap} scrap`])],
+      ['Reforge', reforge.map(row => [row.label, `${row.cost} scrap: ${row.into}`])],
+    ]));
+    return;
+  }
+  if (scene === 'trader') {
+    const { gold, stock, sell } = details.trader;
+    panel.replaceChildren(venue('trader', 'The Trader', `Gold: ${gold}`, [
+      ['For sale', stock.map(row => [`${row.label}, ${row.price} gold`, row.note])],
+      ['He would buy', sell.map(item => [item.name, `${item.gold} gold`])],
+    ]));
+    return;
+  }
+  if (scene === 'spoils') {
+    previous.enemy = null;
+    const arena = element('div', 'arena');
+    arena.append(partySide(details, scene), spoilsCard(details.spoils));
+    panel.replaceChildren(arena);
     return;
   }
   // Every fight is preceded by an 'explore' scene, which clears the enemy's

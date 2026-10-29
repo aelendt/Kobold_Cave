@@ -83,14 +83,31 @@ Ability you pick. Recruiting never powers you up as well. A fallen companion
 stays down; the run ends when the whole party falls.
 
 Swords add attack and shields add max HP. Loot is rolled for the whole party:
-a camp only turns up things someone standing can use, and you choose who takes
-each find (the list shows what it would replace), or put it in the party bag.
-Anything a hero swaps out goes in the bag too, and you can hand bag items out
-between fights. The bag holds 6 items; when it overflows, the oldest is left
-behind. Loot gets better the deeper you go:
+a camp only turns up things someone standing can use. A find goes straight
+into an empty slot if any hero has one it fits; otherwise it goes in the party
+bag. To equip something from the bag, use the Equip button on a slot in the
+party panel (or, in the terminal, the menu offered between fights). Whatever
+comes off goes back in the bag. Gear can't be changed mid-fight. The bag holds
+8 items; when it overflows, the oldest is left behind. Loot gets better the
+deeper you go:
 the Upper Mines turn up Fine and Firebrand gear, the Deep Warrens Firebrand and
 Mithril, and the Hoard Mithril and Dragonbone. Rogues can carry a parrying
 dagger in their off hand instead of a second sword: less attack, more health.
+
+Twice in each of the first two stages, and once in the Hoard, the tunnel
+splits three ways:
+
+- **The Forge:** break bag items down into scrap (1 to 4 each, by tier) and
+  spend scrap to reforge a hero's equipped weapon, shield or staff, up to +3.
+  Reforges cost 2, 3, then 4 scrap.
+- **The Trader:** spend gold on bandages (8), a Troll's Blood Vial (20), a
+  trinket (30), or a skill tome (45) that teaches one of your heroes a new
+  skill. He'll also buy your old gear.
+- **A dark tunnel:** half the time a forgotten cache of gold and maybe an
+  item; half the time an ambush by the stage's toughest kobolds, who strike
+  first. Win, and you keep its XP and gold.
+
+Kobolds drop gold when they fall, and bosses drop a lot of it.
 
 Every hero also has a trinket slot:
 
@@ -125,7 +142,15 @@ To see every dice roll, set `DEBUG = True` at the top of `kobold_cave.py`.
 `index.html` runs the same `kobold_cave.py` in Chrome using
 [Pyodide](https://pyodide.org) (Python compiled to WebAssembly). Menus become
 buttons, number keys pick options, and a picture panel shows pixel-art
-portraits, health bars and mana for each fight. The sprites live in
+portraits, health bars and mana for each fight. The newest turn is always at
+the top of the log, just under your choices, and its text arrives a line at a
+time so it can be followed (click the log or press any key to show the rest at
+once). After each fight a spoils card sums up the XP, gold, loot, bandages and
+healing. A party panel on the left has a
+tab per hero with their stats, gear and skills (with cooldowns), and field
+notes on the right show the current enemy's abilities, your progress through
+the stages, and your supplies. On narrower screens the two panels open as
+drawers from the header. The sprites live in
 `sprites.js` as 16x16 grids of letters, one per pixel, so you can edit them in
 any text editor. Serve the folder, then open
 http://localhost:8000 in Chrome 137 or newer:
