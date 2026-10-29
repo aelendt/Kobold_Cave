@@ -595,7 +595,7 @@ def meteor(member, party, monster, rng, ask):
 
 
 def cleave(member, party, monster, rng, ask):
-    strike(member, monster, member.attack * 2 + rng.randint(-2, 2),
+    strike(member, monster, round(member.attack * 1.5) + rng.randint(-2, 2),
            'You put your whole weight into it and cleave {target} for {damage} damage.',
            '{name} cleaves {target} for {damage} damage.')
 
@@ -641,7 +641,7 @@ ACTIONS = {action.name: action for action in (
     Action('Mend', mend, 'Heal yourself or an ally.', mana=1),
     Action('Frost Bolt', frost_bolt, 'Never misses, and may freeze the enemy in place.', mana=1),
     Action('Meteor', meteor, 'Double spell power, guaranteed. Costs 2 mana.', mana=2),
-    Action('Cleave', cleave, 'A double-damage swing. Every 3 rounds.', cooldown=3),
+    Action('Cleave', cleave, 'A swing for 1.5x damage. Every 3 rounds.', cooldown=3),
     Action('Shield Wall', shield_wall, 'Guard, and draw every strike to you this round. '
                                        'Every 3 rounds.', cooldown=3),
     Action('Stunning Strike', stunning_strike, 'A hit that makes the enemy lose its next turn. '

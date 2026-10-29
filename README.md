@@ -20,7 +20,7 @@ specials. Two more skills per class are learned by keeping a boss's hoard:
 - **Mend** (1 mana): heal yourself or an ally.
 - **Frost Bolt** (1 mana): never misses, and may freeze the enemy out of its next turn.
 - **Meteor** (2 mana): double spell power, guaranteed.
-- **Cleave**: a double-damage swing. Every 3 rounds.
+- **Cleave**: a swing for 1.5x damage. Every 3 rounds.
 - **Shield Wall**: guard, and draw every strike to you this round. Every 3 rounds.
 - **Stunning Strike**: a hit that makes the enemy lose its next turn. Every 3 rounds.
 - **Backstab**: double damage, quadruple against a stunned enemy. Every 3 rounds.

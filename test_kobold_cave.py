@@ -342,12 +342,12 @@ class SkillTests(unittest.TestCase):
         quietly(game.stun, leader, FakeRng(2))
         self.assertTrue(leader.stunned)
 
-    def test_cleave_doubles_damage_then_needs_three_rounds(self):
+    def test_cleave_hits_for_one_and_a_half_then_needs_three_rounds(self):
         warrior, guard = hero(), game.spawn('kobold_guard')
         warrior.actions.append('Cleave')
         party = party_of(warrior)
         quietly(game.take_turn, warrior, party, guard, FakeRng(0), answers('cleave'))
-        self.assertEqual(guard.health, 55 - 30)
+        self.assertEqual(guard.health, 55 - round(15 * 1.5))
         _, out = captured(game.take_turn, warrior, party, guard, FakeRng(0),
                           answers('cleave', 'attack'))
         self.assertIn('not ready to use Cleave again (3 more rounds)', out)
