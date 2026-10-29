@@ -75,18 +75,19 @@ class TableTests(unittest.TestCase):
 
     def test_tables_use_d10s_and_d20s(self):
         tables = [table for stage in game.STAGES for _, table in stage.encounters]
-        for job in game.JOBS.values():
-            tables += [job.loot['common'], job.loot['rare']]
+        tables += [table for stage in game.STAGES for table in stage.loot.values()]
         for table in tables:
             self.assertIn(sum(weight for weight, _ in table), (10, 20))
 
-    def test_every_job_only_finds_gear_it_can_use(self):
-        for job in game.JOBS.values():
-            usable = set(job.slots.values())
-            for table in job.loot.values():
-                for _, item in table:
-                    if item:
-                        self.assertIn(item.kind, usable, f'{job.name} found {item.name}')
+    def test_every_class_can_find_gear_in_every_tier_its_stage_offers(self):
+        for stage in game.STAGES:
+            for table in stage.loot.values():
+                for _, outcome in table:
+                    if isinstance(outcome, int):
+                        for job in game.JOBS.values():
+                            member = hero(job.name.lower())
+                            self.assertTrue([item for item in game.GEAR if item.tier == outcome
+                                             and game.fits(member, item)], (job.name, outcome))
 
     def test_bosses_only_appear_at_the_end_of_their_stage(self):
         for stage in game.STAGES:
@@ -119,26 +120,25 @@ class TableTests(unittest.TestCase):
 class EquipmentTests(unittest.TestCase):
     def test_first_sword_is_equipped_automatically(self):
         warrior = hero()
-        quietly(game.search_camp, party_of(warrior), kobold(), FakeRng(1))
+        quietly(game.receive, warrior, game.ITEMS['fine_sword'])
         self.assertEqual(warrior.attack, 20)
 
     def test_shield_raises_max_and_current_health(self):
         warrior = hero()
         warrior.health = 100
-        quietly(game.search_camp, party_of(warrior), kobold(loot_tier='rare'), FakeRng(20))
+        quietly(game.receive, warrior, game.ITEMS['mithril_buckler'])
         self.assertEqual((warrior.health, warrior.max_health), (175, 225))
 
     def test_swords_do_not_stack(self):
         warrior = hero()
         game.equip(warrior, 'Weapon', game.ITEMS['fine_sword'])
-        quietly(game.search_camp, party_of(warrior), kobold(), FakeRng(5), answers('weapon'))
+        quietly(game.receive, warrior, game.ITEMS['firebrand'], answers('weapon'))
         self.assertEqual(warrior.attack, 15 + 10)
 
     def test_keeping_your_gear_leaves_the_new_item(self):
         warrior = hero()
         game.equip(warrior, 'Weapon', game.ITEMS['mithril_blade'])
-        quietly(game.search_camp, party_of(warrior), kobold(), FakeRng(1),
-                answers('nonsense', 'keep'))
+        quietly(game.receive, warrior, game.ITEMS['fine_sword'], answers('nonsense', 'keep'))
         self.assertEqual(warrior.equipment['Weapon'], game.ITEMS['mithril_blade'])
 
     def test_downgrading_a_shield_only_trims_health_to_the_new_max(self):
@@ -150,21 +150,120 @@ class EquipmentTests(unittest.TestCase):
 
     def test_rogue_dual_wields(self):
         rogue = hero('rogue')
-        quietly(game.search_camp, party_of(rogue), kobold(), FakeRng(1))
-        quietly(game.search_camp, party_of(rogue), kobold(), FakeRng(5))
+        quietly(game.receive, rogue, game.ITEMS['fine_sword'])
+        quietly(game.receive, rogue, game.ITEMS['firebrand'])
         self.assertEqual(rogue.attack, 12 + 5 + 10)
+
+    def test_rogue_off_hand_takes_a_parrying_dagger(self):
+        rogue = hero('rogue')
+        game.equip(rogue, 'Main hand', game.ITEMS['firebrand'])
+        quietly(game.receive, rogue, game.ITEMS['parrying_dagger'])
+        self.assertEqual(rogue.equipment['Off hand'], game.ITEMS['parrying_dagger'])
+        self.assertEqual((rogue.attack, rogue.max_health), (12 + 10 + 4, 120 + 35))
+
+    def test_only_rogues_can_use_daggers_and_only_wizards_find_mana_crystals(self):
+        dagger, crystal = game.ITEMS['parrying_dagger'], game.ITEMS['mana_crystal']
+        self.assertTrue(game.fits(hero('rogue'), dagger))
+        self.assertFalse(game.fits(hero(), dagger))
+        self.assertTrue(game.fits(hero('wizard'), crystal))
+        self.assertFalse(game.fits(hero('rogue'), crystal))
 
     def test_staves_add_spell_power_or_mana(self):
         wizard = hero('wizard')
         game.equip(wizard, 'Staff', game.ITEMS['crystal_staff'])
         self.assertEqual((wizard.spell_power, wizard.max_mana, wizard.mana), (70, 7, 7))
 
+    def test_loot_rolls_give_nothing_a_trinket_or_gear_of_a_tier(self):
+        rogue = hero('rogue')
+        table = ((1, None), (1, 'trinket'), (1, 2))
+        self.assertIsNone(game.roll_loot(rogue, table, FakeRng(1)))
+        self.assertEqual(game.roll_loot(rogue, table, FakeRng(2, 0)).kind, 'trinket')
+        tier_two = [game.roll_loot(rogue, table, FakeRng(3, i)) for i in (0, 1)]
+        self.assertEqual({item.name for item in tier_two}, {'Firebrand Sword', 'Parrying Dagger'})
+
+    def test_each_stage_finds_better_gear(self):
+        best = [max(value for _, value in stage.loot['rare'] if isinstance(value, int))
+                for stage in game.STAGES]
+        self.assertEqual(best, sorted(best))
+        self.assertEqual(best[-1], 4)
+
     def test_in_a_party_whoever_searches_gets_gear_for_their_class(self):
         warrior, wizard = hero(), companion('wizard', 'Ysolde')
-        # the second member searches, then rolls a 1 on the wizard's table
-        quietly(game.search_camp, party_of(warrior, wizard), kobold(), FakeRng(1, 1))
+        # the second member searches; tier 1 on the Upper Mines table; the second of the
+        # wizard's tier-1 items (Fine Shield, Apprentice Staff)
+        quietly(game.search_camp, party_of(warrior, wizard), kobold(), FakeRng(1, 8, 1))
         self.assertEqual(wizard.equipment['Staff'], game.ITEMS['apprentice_staff'])
         self.assertIsNone(warrior.equipment['Weapon'])
+
+
+class TrinketTests(unittest.TestCase):
+    def test_every_class_has_a_trinket_slot(self):
+        for job in game.JOBS.values():
+            self.assertIn('Trinket', job.slots)
+
+    def test_vial_is_drunk_mid_fight_and_used_up(self):
+        warrior = hero()
+        game.equip(warrior, 'Trinket', game.ITEMS['trolls_blood'])
+        warrior.health = 50
+        turn(warrior, party_of(warrior), kobold(), [], 'drink vial')
+        self.assertEqual(warrior.health, 50 + 60)
+        self.assertIsNone(warrior.trinket)
+
+    def test_no_vial_no_drink(self):
+        warrior = hero()
+        _, out = captured(game.take_turn, warrior, party_of(warrior), kobold(), FakeRng(0),
+                          answers('drink vial', 'attack'))
+        self.assertIn('Please select a valid action.', out)
+
+    def test_vampires_fang_heals_from_damage_dealt(self):
+        warrior = hero()
+        game.equip(warrior, 'Trinket', game.ITEMS['vampires_fang'])
+        warrior.health = 100
+        turn(warrior, party_of(warrior), kobold(health=100), [0], 'attack')
+        self.assertEqual(warrior.health, 100 + round(15 * 0.15))
+
+    def test_emberward_halves_fire_breath(self):
+        warrior, rogue = hero(), companion()
+        game.equip(warrior, 'Trinket', game.ITEMS['emberward_charm'])
+        dragon = boss(breath=30, signature='Fire Breath', charging='Fire Breath')
+        quietly(game.monster_turn, party_of(warrior, rogue), dragon, 4, FakeRng(0, 0))
+        self.assertEqual((warrior.health, rogue.health), (150 - 15, 120 - 30))
+
+    def test_lucky_coin_can_turn_a_blow_aside(self):
+        warrior = hero()
+        game.equip(warrior, 'Trinket', game.ITEMS['lucky_coin'])
+        quietly(game.monster_strikes, warrior, kobold(), FakeRng(0, -2, 1))  # the coin rolls 1
+        self.assertEqual(warrior.health, 150)
+        quietly(game.monster_strikes, warrior, kobold(), FakeRng(0, -2, 2))
+        self.assertEqual(warrior.health, 140)
+
+    def test_medics_satchel_boosts_bandages(self):
+        warrior = hero()
+        game.equip(warrior, 'Trinket', game.ITEMS['medics_satchel'])
+        warrior.health = 20
+        quietly(game.offer_bandages, party_of(warrior), answers('yes', 'no'))
+        self.assertEqual(warrior.health, 20 + round(150 * game.BANDAGE_HEAL * 1.5))
+
+    def test_thorned_bracer_bites_back(self):
+        warrior, monster = hero(), kobold(attack=20)
+        game.equip(warrior, 'Trinket', game.ITEMS['thorned_bracer'])
+        quietly(game.monster_strikes, warrior, monster, FakeRng(0, -2))
+        self.assertEqual(monster.health, 35 - 5)
+
+    def test_bosses_drop_a_unique_for_the_party_leader(self):
+        rogue = hero('rogue')
+        quietly(game.claim_boss_drop, party_of(rogue), game.spawn('kobold_warchief'),
+                answers('main hand'))
+        self.assertIn(game.ITEMS['hand_axe'], rogue.equipment.values())
+        quietly(game.claim_boss_drop, party_of(rogue), game.spawn('kobold_leader'))
+        self.assertEqual(rogue.trinket, game.ITEMS['junk_crown'])
+
+    def test_junk_crown_hits_bosses_harder(self):
+        warrior = hero()
+        game.equip(warrior, 'Trinket', game.ITEMS['junk_crown'])
+        monster = boss(health=300)
+        turn(warrior, party_of(warrior), monster, [0], 'attack')
+        self.assertEqual(monster.health, 300 - round(15 * 1.15))
 
 
 class HealingTests(unittest.TestCase):
@@ -693,7 +792,7 @@ class RewardTests(unittest.TestCase):
         quietly(game.boss_reward, party, 0, FakeRng(2, -1, 0), answers('ysolde'))
         recruit = party.members[1]
         self.assertEqual((recruit.name, recruit.job.name), ('Ysolde', 'Wizard'))
-        self.assertEqual(recruit.equipment['Staff'], game.ITEMS['apprentice_staff'])
+        self.assertEqual(recruit.equipment['Staff'], game.ITEMS['ember_staff'])
         self.assertEqual(recruit.actions, ['Mana Surge', 'Fireball'])
         self.assertEqual(recruit.health, recruit.max_health)
         self.assertFalse(recruit.hero)
@@ -784,8 +883,10 @@ class FlowTests(unittest.TestCase):
         warrior = hero(attack=1000)
         warrior.health = 100
         party = party_of(warrior)
-        # encounter: miner; one hit; Fine Shield; a bandage drop; then the boss
-        won = quietly(game.play, party, FakeRng(5, 0, 3, 1, 0), answers('attack', 'no', 'attack'))
+        # encounter: miner; one hit; tier 1 gear, the Fine Shield; a bandage drop;
+        # then the boss, who drops the Junk Crown
+        won = quietly(game.play, party, FakeRng(5, 0, 8, 1, 1, 0),
+                      answers('attack', 'no', 'attack'))
         self.assertTrue(won)
         self.assertEqual(party.cs, 2)
         self.assertEqual(warrior.max_health, 175)

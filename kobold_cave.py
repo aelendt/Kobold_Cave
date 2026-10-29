@@ -46,31 +46,77 @@ def roll_on_table(table, rng=random):
 @dataclass(frozen=True)
 class Item:
     name: str
-    kind: str  # which slot it fits: 'sword', 'shield' or 'staff'
+    kind: str  # which slot it fits: 'sword', 'dagger', 'shield', 'staff' or 'trinket'
     attack: int = 0
     max_health: int = 0
     spell_power: int = 0
     mana: int = 0
     dodge: int = 0
+    tier: int = 0  # 1 Fine .. 4 Dragonbone; 0 for things that never drop at random
+    effect: str = ''  # what a trinket does, see TRINKET_EFFECTS
+    jobs: tuple = ()  # classes that can find it; empty means everyone
 
     def describe(self):
         bonuses = [(self.attack, 'attack'), (self.max_health, 'max HP'),
                    (self.spell_power, 'spell power'), (self.mana, 'mana'),
                    (self.dodge, 'dodge')]
-        return ', '.join(f'+{amount} {stat}' for amount, stat in bonuses if amount)
+        parts = [f'+{amount} {stat}' for amount, stat in bonuses if amount]
+        if self.effect:
+            parts.append(TRINKET_EFFECTS[self.effect])
+        return ', '.join(parts)
 
+
+TRINKET_EFFECTS = {
+    'lifesteal': 'heals you for 15% of the damage you deal',
+    'fireward': 'halves fire damage',
+    'lucky': 'a 1 in 5 chance any blow against you misses',
+    'satchel': 'bandages heal you 50% more',
+    'thorns': 'reflects 25% of the damage from blows that hit you',
+    'vial': 'drink in a fight to heal 40% of your max HP (used up)',
+    'bossbane': '+15% damage against bosses',
+}
 
 ITEMS = {
-    'fine_sword': Item('Fine Sword', 'sword', attack=5),
-    'firebrand': Item('Firebrand Sword', 'sword', attack=10),
-    'mithril_blade': Item('Mithril Blade', 'sword', attack=15),
-    'fine_shield': Item('Fine Shield', 'shield', max_health=25),
-    'thick_shield': Item('Thick Kite Shield', 'shield', max_health=50),
-    'mithril_buckler': Item('Mithril Buckler', 'shield', max_health=75),
-    'apprentice_staff': Item('Apprentice Staff', 'staff', spell_power=10),
-    'staff_of_insight': Item('Staff of Insight', 'staff', mana=1),
-    'ember_staff': Item('Ember Staff', 'staff', spell_power=25),
-    'crystal_staff': Item('Crystal Staff', 'staff', spell_power=10, mana=2),
+    # Gear, by tier. Each stage's camps roll from better tiers (Stage.loot).
+    'fine_sword': Item('Fine Sword', 'sword', attack=5, tier=1),
+    'firebrand': Item('Firebrand Sword', 'sword', attack=10, tier=2),
+    'mithril_blade': Item('Mithril Blade', 'sword', attack=15, tier=3),
+    'dragonbone_sword': Item('Dragonbone Sword', 'sword', attack=22, tier=4),
+    'fine_shield': Item('Fine Shield', 'shield', max_health=25, tier=1),
+    'thick_shield': Item('Thick Kite Shield', 'shield', max_health=50, tier=2),
+    'mithril_buckler': Item('Mithril Buckler', 'shield', max_health=75, tier=3),
+    'dragonscale_shield': Item('Dragonscale Shield', 'shield', max_health=110, tier=4),
+    'apprentice_staff': Item('Apprentice Staff', 'staff', spell_power=10, tier=1),
+    'ember_staff': Item('Ember Staff', 'staff', spell_power=25, tier=2),
+    'staff_of_insight': Item('Staff of Insight', 'staff', mana=1, tier=2),
+    'stormcaller_staff': Item('Stormcaller Staff', 'staff', spell_power=35, tier=3),
+    'crystal_staff': Item('Crystal Staff', 'staff', spell_power=10, mana=2, tier=3),
+    'dragonbone_staff': Item('Dragonbone Staff', 'staff', spell_power=45, mana=1, tier=4),
+    # Rogue off-hand daggers: less attack than a sword, but some protection.
+    'parrying_dagger': Item('Parrying Dagger', 'dagger', attack=4, max_health=35, tier=2),
+    'main_gauche': Item('Mithril Main-Gauche', 'dagger', attack=8, max_health=60, tier=3),
+    # Trinkets: one per hero, found in any stage.
+    'vampires_fang': Item("Vampire's Fang", 'trinket', effect='lifesteal'),
+    'emberward_charm': Item('Emberward Charm', 'trinket', effect='fireward'),
+    'lucky_coin': Item('Lucky Coin', 'trinket', effect='lucky'),
+    'medics_satchel': Item("Medic's Satchel", 'trinket', effect='satchel'),
+    'mana_crystal': Item('Mana Crystal', 'trinket', mana=2, jobs=('Wizard',)),
+    'thorned_bracer': Item('Thorned Bracer', 'trinket', effect='thorns'),
+    'trolls_blood': Item("Troll's Blood Vial", 'trinket', effect='vial'),
+    # Boss uniques, see BOSS_DROPS.
+    'junk_crown': Item('Junk Crown', 'trinket', effect='bossbane'),
+    'war_axe': Item("Warchief's War Axe", 'sword', attack=20),
+    'hand_axe': Item("Warchief's Hand-Axe", 'sword', attack=17),
+    'drum_shield': Item('Bone-Drum Shield', 'shield', max_health=90, spell_power=10),
+}
+
+GEAR = [item for item in ITEMS.values() if item.tier]
+TRINKETS = [item for item in ITEMS.values() if item.kind == 'trinket' and item.name != 'Junk Crown']
+
+# Each boss leaves something special for the hero who leads the party.
+BOSS_DROPS = {
+    'Kobold Leader': {'Warrior': 'junk_crown', 'Rogue': 'junk_crown', 'Wizard': 'junk_crown'},
+    'Kobold Warchief': {'Warrior': 'war_axe', 'Rogue': 'hand_axe', 'Wizard': 'drum_shield'},
 }
 
 # Stat power-ups for keeping a boss's hoard instead of freeing a prisoner.
@@ -82,33 +128,6 @@ BOONS = {
 }
 
 
-# Loot tables per job. Common loot is rolled on a d10 (None means the camp
-# is empty); rare loot is rolled on a d20 and tougher kobolds always carry
-# something.
-WARRIOR_LOOT = {
-    'common': ((2, ITEMS['fine_sword']), (2, ITEMS['fine_shield']),
-               (1, ITEMS['firebrand']), (1, ITEMS['thick_shield']), (4, None)),
-    'rare': ((2, ITEMS['fine_sword']), (3, ITEMS['fine_shield']),
-             (8, ITEMS['firebrand']), (5, ITEMS['thick_shield']),
-             (1, ITEMS['mithril_blade']), (1, ITEMS['mithril_buckler'])),
-}
-
-ROGUE_LOOT = {
-    'common': ((4, ITEMS['fine_sword']), (2, ITEMS['firebrand']), (4, None)),
-    'rare': ((5, ITEMS['fine_sword']), (13, ITEMS['firebrand']),
-             (2, ITEMS['mithril_blade'])),
-}
-
-WIZARD_LOOT = {
-    'common': ((2, ITEMS['apprentice_staff']), (2, ITEMS['fine_shield']),
-               (1, ITEMS['staff_of_insight']), (1, ITEMS['thick_shield']), (4, None)),
-    'rare': ((2, ITEMS['apprentice_staff']), (3, ITEMS['fine_shield']),
-             (4, ITEMS['ember_staff']), (4, ITEMS['staff_of_insight']),
-             (5, ITEMS['thick_shield']), (1, ITEMS['crystal_staff']),
-             (1, ITEMS['mithril_buckler'])),
-}
-
-
 # --- Jobs -----------------------------------------------------------------
 
 @dataclass(frozen=True)
@@ -117,8 +136,7 @@ class Job:
     health: int
     attack: int
     dodge: int
-    slots: dict  # slot name -> kind of item it holds
-    loot: dict  # 'common' / 'rare' -> loot table
+    slots: dict  # slot name -> the kinds of item it holds
     spell_power: int = 0
     mana: int = 0
     actions: tuple = ()  # signature moves every hero of this class knows
@@ -129,19 +147,20 @@ class Job:
 
 JOBS = {
     'warrior': Job('Warrior', health=150, attack=15, dodge=3,
-                   slots={'Weapon': 'sword', 'Shield': 'shield'}, loot=WARRIOR_LOOT,
+                   slots={'Weapon': ('sword',), 'Shield': ('shield',), 'Trinket': ('trinket',)},
                    skills=('Cleave', 'Shield Bash', 'Shield Wall', 'Second Wind', 'Battle Cry'),
                    boon_abilities=('Execute', 'Last Stand'),
                    growth=Item('Level', 'growth', attack=3, max_health=25)),
     'rogue': Job('Rogue', health=120, attack=12, dodge=4,
-                 slots={'Main hand': 'sword', 'Off hand': 'sword'}, loot=ROGUE_LOOT,
+                 slots={'Main hand': ('sword',), 'Off hand': ('sword', 'dagger'),
+                        'Trinket': ('trinket',)},
                  actions=('Flee',),
                  skills=('Stunning Strike', 'Poison Blade', 'Smoke Bomb', 'Twin Strike',
                          'Pickpocket'),
                  boon_abilities=('Backstab', 'Assassinate'),
-                 growth=Item('Level', 'growth', attack=2, max_health=10)),
+                 growth=Item('Level', 'growth', attack=1, max_health=10)),
     'wizard': Job('Wizard', health=130, attack=10, dodge=3,
-                  slots={'Staff': 'staff', 'Shield': 'shield'}, loot=WIZARD_LOOT,
+                  slots={'Staff': ('staff',), 'Shield': ('shield',), 'Trinket': ('trinket',)},
                   spell_power=60, mana=5, actions=('Mana Surge',),
                   skills=('Fireball', 'Mend', 'Frost Bolt', 'Arcane Shield', 'Drain Life'),
                   boon_abilities=('Meteor', 'Time Stop'),
@@ -207,6 +226,13 @@ class Character:
     @property
     def alive(self):
         return self.health > 0
+
+    @property
+    def trinket(self):
+        return self.equipment.get('Trinket')
+
+    def has(self, effect):
+        return bool(self.trinket and self.trinket.effect == effect)
 
 
 def print_job_stats(job):
@@ -277,6 +303,7 @@ class Party:
     bandages: int = START_BANDAGES
     cs: int = 0  # creep score: how many kobolds you have slain
     stage: str = ''
+    depth: int = 0  # index of the current stage in STAGES, for its loot
     smoke: bool = False  # Smoke Bomb: every strike misses this round
     shielded: bool = False  # Arcane Shield: damage is halved this round
 
@@ -311,7 +338,7 @@ def print_status(party, monster):
 
 def choose_slot(character, item, ask=input):
     """Return the slot to put the item in, or None to leave it behind."""
-    slots = [slot for slot, kind in character.job.slots.items() if kind == item.kind]
+    slots = [slot for slot, kinds in character.job.slots.items() if item.kind in kinds]
     for slot in slots:
         if character.equipment[slot] is None:
             return slot
@@ -348,23 +375,49 @@ def pick(options, rng):
     return options[0] if len(options) == 1 else options[rng.randint(0, len(options) - 1)]
 
 
+def fits(member, item):
+    if item.jobs and member.job.name not in item.jobs:
+        return False
+    return any(item.kind in kinds for kinds in member.job.slots.values())
+
+
+def roll_loot(member, table, rng):
+    """Roll on a stage's loot table: nothing, a trinket, or gear of some tier
+    that this hero can use."""
+    outcome = roll_on_table(table, rng)
+    if outcome is None:
+        return None
+    if outcome == 'trinket':
+        pool = [item for item in TRINKETS if fits(member, item)]
+    else:
+        pool = [item for item in GEAR if item.tier == outcome and fits(member, item)]
+    return pick(pool, rng)
+
+
 def search_camp(party, monster, rng=random, ask=input):
-    # Whoever searches finds gear for their own class.
+    # Whoever searches finds gear for their own class, from this stage's table.
     finder = pick(party.living, rng)
-    item = roll_on_table(finder.job.loot[monster.loot_tier], rng)
+    item = roll_loot(finder, STAGES[party.depth].loot[monster.loot_tier], rng)
     if item is None:
         narrate(finder, 'You search the kobolds camp but find nothing of worth. '
                         'You take your frustration out on the kobolds corpse.',
                 '{name} searches the kobolds camp but finds nothing of worth.')
         return
-    narrate(finder, f'You search the kobolds camp and find a [{item.name}] ({item.describe()}).',
-            f'{{name}} searches the kobolds camp and finds a [{item.name}] ({item.describe()}).')
-    slot = choose_slot(finder, item, ask)
+    a = 'an' if item.name[0] in 'AEIOU' else 'a'
+    narrate(finder, f'You search the kobolds camp and find {a} [{item.name}] ({item.describe()}).',
+            f'{{name}} searches the kobolds camp and finds {a} [{item.name}] '
+            f'({item.describe()}).')
+    receive(finder, item, ask)
+
+
+def receive(member, item, ask=input):
+    """Equip a found item, asking which slot to replace if they're all full."""
+    slot = choose_slot(member, item, ask)
     if slot is None:
         print(f'You leave the [{item.name}] behind.')
         return
-    equip(finder, slot, item)
-    narrate(finder, f'You equip the [{item.name}].', f'{{name}} equips the [{item.name}].')
+    equip(member, slot, item)
+    narrate(member, f'You equip the [{item.name}].', f'{{name}} equips the [{item.name}].')
 
 
 def find_bandages(party, monster, rng=random):
@@ -413,7 +466,8 @@ def offer_bandages(party, ask=input):
             continue
         member = options[answer]
         party.bandages -= 1
-        healed = heal(member, round(member.max_health * BANDAGE_HEAL))
+        boost = 1.5 if member.has('satchel') else 1
+        healed = heal(member, round(member.max_health * BANDAGE_HEAL * boost))
         narrate(member, f'You bind your wounds and recover {healed} HP.',
                 f'You bind {{name}}\'s wounds. They recover {healed} HP.')
         show_party('explore', party)
@@ -453,24 +507,24 @@ class Monster:
 
 
 BESTIARY = {
-    'kobold_miner': Monster('Kobold Miner', health=40, attack=13, xp=10,
+    'kobold_miner': Monster('Kobold Miner', health=42, attack=14, xp=10,
                             abilities=('Rock Toss',)),
-    'kobold_guard': Monster('Kobold Guardsman', health=64, attack=22, xp=15,
+    'kobold_guard': Monster('Kobold Guardsman', health=67, attack=23, xp=15,
                             abilities=('Shield Up',)),
-    'kobold_heavy': Monster('Kobold Heavy', health=135, attack=38, xp=25, loot_tier='rare',
+    'kobold_heavy': Monster('Kobold Heavy', health=142, attack=40, xp=25, loot_tier='rare',
                             abilities=('Crushing Blow',)),
-    'kobold_shaman': Monster('Kobold Shaman', health=105, attack=37, xp=25,
+    'kobold_shaman': Monster('Kobold Shaman', health=110, attack=39, xp=25,
                              abilities=('Hex',)),
-    'kobold_dragonguard': Monster('Kobold Dragonguard', health=181, attack=44, xp=35,
+    'kobold_dragonguard': Monster('Kobold Dragonguard', health=190, attack=46, xp=35,
                                   loot_tier='rare', abilities=('Fire Spear',)),
-    'kobold_leader': Monster('Kobold Leader', health=284, attack=42, xp=60, boss=True,
+    'kobold_leader': Monster('Kobold Leader', health=304, attack=44, xp=60, boss=True,
                              called='the Leader', abilities=('Dirty Trick', 'Rally'),
                              signature='Junk Avalanche'),
-    'kobold_warchief': Monster('Kobold Warchief', health=638, attack=44, xp=100, boss=True,
+    'kobold_warchief': Monster('Kobold Warchief', health=683, attack=46, xp=100, boss=True,
                                attacks=2, called='the Warchief',
                                abilities=('War Drums', 'Sweeping Axe'), signature='Berserk'),
-    'red_dragon': Monster('Cinderjaw the Red', health=1204, attack=51, boss=True, attacks=2,
-                          breath=40, called='Cinderjaw',
+    'red_dragon': Monster('Cinderjaw the Red', health=1288, attack=54, boss=True, attacks=2,
+                          breath=42, called='Cinderjaw',
                           abilities=('Tail Sweep', 'Wing Buffet'), signature='Fire Breath'),
 }
 
@@ -488,6 +542,7 @@ class Stage:
     fights: int  # kobolds to slay before the boss
     encounters: tuple  # (kills so far below this, table) pairs, checked in order
     boss: str
+    loot: dict  # 'common' / 'rare' -> table of None (empty), 'trinket' or a gear tier
     arrival: str
     boss_intro: str
     boss_outro: str
@@ -504,6 +559,8 @@ STAGES = (
     Stage('Upper Mines', fights=8,
           encounters=((3, SHALLOW_ENCOUNTERS), (5, MIDDLE_ENCOUNTERS), (99, DEEP_ENCOUNTERS)),
           boss='kobold_leader',
+          loot={'common': ((5, None), (2, 'trinket'), (9, 1), (4, 2)),
+                'rare': ((4, 'trinket'), (4, 1), (9, 2), (3, 3))},
           arrival='',
           boss_intro='The tunnel opens into a torch-lit chamber. Atop a throne of stolen junk '
                      'sits the Kobold Leader, who does not look happy to see you.',
@@ -511,6 +568,8 @@ STAGES = (
     Stage('Deep Warrens', fights=8,
           encounters=((4, WARREN_ENCOUNTERS), (99, LOWER_WARREN_ENCOUNTERS)),
           boss='kobold_warchief',
+          loot={'common': ((5, None), (3, 'trinket'), (8, 2), (4, 3)),
+                'rare': ((4, 'trinket'), (4, 2), (9, 3), (3, 4))},
           arrival="Behind the Leader's throne a crude ladder drops into the Deep Warrens. "
                   "The air gets warmer. That's never a good sign.",
           boss_intro='War drums. A Kobold Warchief in a horned helm stomps out of the dark, '
@@ -520,6 +579,8 @@ STAGES = (
     Stage('The Hoard', fights=6,
           encounters=((99, HOARD_ENCOUNTERS),),
           boss='red_dragon',
+          loot={'common': ((5, None), (3, 'trinket'), (8, 3), (4, 4)),
+                'rare': ((4, 'trinket'), (6, 3), (10, 4))},
           arrival='The tunnels open onto a cavern glittering with gold. Kobolds in '
                   "red-lacquered armour guard it like it's their mother. To be fair, it might be.",
           boss_intro='The gold shifts. Then it stands up. Cinderjaw the Red opens one eye, '
@@ -533,11 +594,6 @@ PRISONERS = {
     'warrior': ('Brann', 'Hilda'),
     'rogue': ('Mira', 'Vex'),
     'wizard': ('Ysolde', 'Old Tobin'),
-}
-PRISONER_GEAR = {
-    'warrior': ('fine_sword', 'thick_shield'),
-    'rogue': ('fine_sword', 'firebrand'),
-    'wizard': ('apprentice_staff', 'fine_shield'),
 }
 
 
@@ -601,12 +657,20 @@ def choose_ally(party, ask, question):
 
 def dealt(member, monster, damage):
     """Damage a hero's blow or spell actually does: 25% less while hexed,
-    and half against an enemy behind Shield Up."""
+    half against an enemy behind Shield Up, more against bosses with the
+    Junk Crown. A Vampire's Fang heals for part of it."""
     if member.hexed:
         damage *= 0.75
     if monster.guarding:
         damage *= 0.5
-    return round(damage)
+    if monster.boss and member.has('bossbane'):
+        damage *= 1.15
+    damage = round(damage)
+    if member.has('lifesteal') and damage > 0:
+        healed = heal(member, round(damage * 0.15))
+        if healed:
+            narrate(member, f'Your fang drinks {healed} HP.', f"{{name}}'s fang drinks {healed} HP.")
+    return damage
 
 
 def strike(member, monster, damage, you, them):
@@ -753,6 +817,13 @@ def assassinate(member, party, monster, rng, ask):
 
 # Wizard
 
+def drink_vial(member, party, monster, rng, ask):
+    healed = heal(member, round(member.max_health * 0.4))
+    member.equipment['Trinket'] = None
+    narrate(member, f"You down the Troll's Blood Vial and recover {healed} HP.",
+            f"{{name}} downs a Troll's Blood Vial and recovers {healed} HP.")
+
+
 def mana_surge(member, party, monster, rng, ask):
     gained = min(2, member.max_mana - member.mana)
     if not gained:
@@ -838,6 +909,7 @@ class Action:
 ACTIONS = {action.name: action for action in (
     Action('Attack', attack, 'Hit with your weapons.'),
     Action('Defend', defend, 'Parry, and maybe counter, if the enemy comes for you.'),
+    Action('Drink Vial', drink_vial, "Drink your Troll's Blood Vial: heal 40% of your max HP."),
     # Warrior skills
     Action('Cleave', cleave, 'A swing for 1.5x damage. Every 3 rounds.', cooldown=3),
     Action('Shield Bash', shield_bash, 'Half damage, but stuns the enemy. Every 3 rounds.',
@@ -920,8 +992,7 @@ def monster_strikes(target, monster, rng, halved=False, scale=1.0, parry=True, d
             return False
         narrate(target, 'You fail to defend against the enemy attack',
                 '{name} fails to defend against the enemy attack')
-        hit(target, damage)
-        return True
+        return landed(target, monster, damage, rng)
     if dodge:
         dodge_roll = target.dodge + rng.randint(-2, 3)
         debug(f'Dodge Roll: {dodge_roll}')
@@ -930,7 +1001,27 @@ def monster_strikes(target, monster, rng, halved=False, scale=1.0, parry=True, d
             narrate(target, f'{attacker} swings at you and misses.',
                     f'{attacker} swings at {{name}} and misses.')
             return False
+    return landed(target, monster, damage, rng)
+
+
+def lucky(member, rng):
+    if member.has('lucky') and rng.randint(1, 5) == 1:
+        narrate(member, 'Your lucky coin turns the blow aside.',
+                "{name}'s lucky coin turns the blow aside.")
+        return True
+    return False
+
+
+def landed(target, monster, damage, rng):
+    """A blow that got through parry and dodge. Returns True if it hurt."""
+    if lucky(target, rng):
+        return False
     hit(target, damage)
+    if target.has('thorns'):
+        thorns = round(damage * 0.25)
+        monster.health -= thorns
+        narrate(target, f'Your thorned bracer bites back for {thorns} damage.',
+                f"{{name}}'s thorned bracer bites back for {thorns} damage.")
     return True
 
 
@@ -940,16 +1031,20 @@ def target_of(party, rng):
     return walls[0] if walls else pick(party.living, rng)
 
 
-def area_attack(party, monster, base, rng, you, them, dodgeable=False):
+def area_attack(party, monster, base, rng, you, them, dodgeable=False, fire=False):
     """Hits every hero. Defending or Arcane Shield halves it."""
     for member in party.living:
         if dodgeable and member.dodge + rng.randint(-2, 3) >= 4:
             narrate(member, 'You leap clear.', '{name} leaps clear.')
             continue
+        if lucky(member, rng):
+            continue
         damage = round(base) + rng.randint(-3, 3)
         if party.shielded:
             damage //= 2
         if member.defending:
+            damage //= 2
+        if fire and member.has('fireward'):
             damage //= 2
         wound(member, damage, you.format(damage=damage), them.format(name='{name}', damage=damage))
 
@@ -986,7 +1081,8 @@ def hex_curse(party, monster, rng):
 def fire_spear(party, monster, rng):
     target = target_of(party, rng)
     if monster_strikes(target, monster, rng, party.shielded) and target.alive:
-        target.burning, target.burn = 2, round(monster.attack * 0.3)
+        target.burning = 2
+        target.burn = round(monster.attack * (0.15 if target.has('fireward') else 0.3))
         narrate(target, 'The spear sets you alight.', 'The spear sets {name} alight.')
 
 
@@ -1054,7 +1150,7 @@ def fire_breath(party, monster, rng):
     print(f'{monster.name} breathes a roaring torrent of fire!')
     area_attack(party, monster, monster.breath, rng,
                 'You are scorched for {damage} damage.',
-                '{name} is scorched for {damage} damage.')
+                '{name} is scorched for {damage} damage.', fire=True)
 
 
 @dataclass(frozen=True)
@@ -1179,6 +1275,8 @@ def monster_turn(party, monster, round_number, rng):
 def take_turn(member, party, monster, rng, ask):
     """Ask one party member for orders. Returns True if the party fled."""
     options = ['Attack', 'Defend'] + member.actions
+    if member.has('vial'):
+        options.append('Drink Vial')
     by_name = {option.lower(): option for option in options}
     who = f'{member.name}: ' if len(party.living) > 1 else ''
     menu = f'{who}[{" / ".join(options)}] '
@@ -1330,9 +1428,10 @@ def prisoner(job_key, stage_index, level=1, rng=random):
     taught: one to start, plus one for each skill level they've passed."""
     job = JOBS[job_key]
     member = Character.create(PRISONERS[job_key][stage_index], job)
-    for item_key in PRISONER_GEAR[job_key]:
-        slot = choose_slot(member, ITEMS[item_key])
-        equip(member, slot, ITEMS[item_key])
+    for slot, kinds in job.slots.items():  # the first gear of their stage's tier
+        gear = [item for item in GEAR if item.kind == kinds[0] and item.tier == stage_index + 2]
+        if gear:
+            equip(member, slot, gear[0])
     member.level, member.xp = level, LEVEL_XP[level - 1]
     member.health, member.mana = member.max_health, member.max_mana
     for _ in range(1 + sum(1 for skill_level in SKILL_LEVELS if level >= skill_level)):
@@ -1410,7 +1509,7 @@ def boss_reward(party, stage_index, rng=random, ask=input):
 
 def clear_stage(party, stage, rng=random, ask=input):
     """Fight through one stage and its boss. Returns True if the party survives."""
-    party.stage = stage.name
+    party.stage, party.depth = stage.name, STAGES.index(stage)
     if stage.arrival:
         print('')
         print(stage.arrival)
@@ -1442,8 +1541,20 @@ def clear_stage(party, stage, rng=random, ask=input):
     print('')
     print(stage.boss_outro)
     award_xp(party, boss, rng, ask)
+    claim_boss_drop(party, boss, ask)
     find_bandages(party, boss, rng)
     return True
+
+
+def claim_boss_drop(party, boss, ask=input):
+    drops = BOSS_DROPS.get(boss.name)
+    if not drops or not party.alive:
+        return
+    leader = party.living[0]
+    item = ITEMS[drops[leader.job.name]]
+    narrate(leader, f'Among the wreckage you find the [{item.name}] ({item.describe()}).',
+            f'Among the wreckage {{name}} finds the [{item.name}] ({item.describe()}).')
+    receive(leader, item, ask)
 
 
 def play(party, rng=random, ask=input):
