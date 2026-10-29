@@ -46,7 +46,8 @@ function bar(kind, value, max, from = value) {
   return track;
 }
 
-function fighter({ spriteName, title, subtitle, health, maxHealth, mana, maxMana, before, boss, active }) {
+function fighter({ spriteName, title, subtitle, health, maxHealth, mana, maxMana, before, boss, active,
+                   xp }) {
   const figure = element('figure', 'fighter');
   if (active) figure.classList.add('active');
   if ((SPRITES[spriteName]?.length || 16) > 16) figure.classList.add('big');
@@ -76,6 +77,13 @@ function fighter({ spriteName, title, subtitle, health, maxHealth, mana, maxMana
     for (let i = 0; i < maxMana; i++) pips.append(element('i', i < mana ? 'full' : ''));
     caption.append(pips);
   }
+  if (xp) {
+    // A thin bar of progress through the current level.
+    const progress = xp.to ? (xp.now - xp.from) / (xp.to - xp.from) : 1;
+    const track = bar('xp', progress, 1);
+    track.title = xp.to ? `${xp.now} / ${xp.to} XP` : 'Max level';
+    caption.append(track);
+  }
   figure.append(caption);
   return figure;
 }
@@ -86,7 +94,8 @@ function partySide({ party, active, bandages }, scene) {
     side.append(fighter({
       spriteName: member.job.toLowerCase(),
       title: member.name || 'Nameless',
-      subtitle: member.job,
+      subtitle: `${member.job} · Lv ${member.level}`,
+      xp: { now: member.xp, from: member.xp_from, to: member.xp_to },
       health: member.health,
       maxHealth: member.max_health,
       mana: member.mana,
@@ -184,7 +193,8 @@ function recruitCards({ prisoners, boon, abilities }, pick) {
   const grid = element('div', 'jobs recruits');
   prisoners.forEach((prisoner, i) => grid.append(choiceCard(
     prisoner.job.toLowerCase(), i + 1, prisoner.name,
-    [[`${prisoner.job} · ${prisoner.max_health} HP`], [`Knows ${prisoner.skill}`]],
+    [[`${prisoner.job} · Lv ${prisoner.level} · ${prisoner.max_health} HP`],
+     [`Knows ${prisoner.skills.join(', ')}`]],
     () => pick(prisoner.name))));
   abilities.forEach((ability, i) => grid.append(choiceCard(
     'chest', prisoners.length + i + 1, ability.name,

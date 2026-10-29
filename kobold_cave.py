@@ -10,6 +10,8 @@ BANDAGE_HEAL = 0.4  # fraction of max HP a bandage restores
 MEND_POWER = 0.5  # Mend heals this fraction of the caster's spell power
 START_BANDAGES = 2
 MAX_PARTY = 3
+LEVEL_XP = (0, 50, 120, 220, 350, 520, 720, 950)  # total XP needed to reach each level
+SKILL_LEVELS = (2, 4)  # level-ups that also teach a basic skill (1 of 2 offered)
 
 
 def debug(message):
@@ -74,9 +76,9 @@ ITEMS = {
 # Stat power-ups for keeping a boss's hoard instead of freeing a prisoner.
 # Keeping the hoard also teaches one of the hero's Boon Abilities.
 BOONS = {
-    'Warrior': Item("Warlord's Vigour", 'boon', attack=13, max_health=110),
-    'Rogue': Item('Shadow Training', 'boon', attack=13, max_health=70),
-    'Wizard': Item('Arcane Mastery', 'boon', spell_power=25, mana=1, max_health=60),
+    'Warrior': Item("Warlord's Vigour", 'boon', attack=16, max_health=130),
+    'Rogue': Item('Shadow Training', 'boon', attack=16, max_health=90),
+    'Wizard': Item('Arcane Mastery', 'boon', spell_power=30, mana=1, max_health=80),
 }
 
 
@@ -122,24 +124,28 @@ class Job:
     actions: tuple = ()  # signature moves every hero of this class knows
     skills: tuple = ()  # basic skills; each run starts with 1 of 3 random picks
     boon_abilities: tuple = ()  # powerful skills learned by keeping a boss's hoard
+    growth: object = None  # Item of stats gained per level (mana per two levels)
 
 
 JOBS = {
     'warrior': Job('Warrior', health=150, attack=15, dodge=3,
                    slots={'Weapon': 'sword', 'Shield': 'shield'}, loot=WARRIOR_LOOT,
                    skills=('Cleave', 'Shield Bash', 'Shield Wall', 'Second Wind', 'Battle Cry'),
-                   boon_abilities=('Execute', 'Last Stand')),
+                   boon_abilities=('Execute', 'Last Stand'),
+                   growth=Item('Level', 'growth', attack=3, max_health=25)),
     'rogue': Job('Rogue', health=120, attack=12, dodge=4,
                  slots={'Main hand': 'sword', 'Off hand': 'sword'}, loot=ROGUE_LOOT,
                  actions=('Flee',),
                  skills=('Stunning Strike', 'Poison Blade', 'Smoke Bomb', 'Twin Strike',
                          'Pickpocket'),
-                 boon_abilities=('Backstab', 'Assassinate')),
+                 boon_abilities=('Backstab', 'Assassinate'),
+                 growth=Item('Level', 'growth', attack=2, max_health=10)),
     'wizard': Job('Wizard', health=130, attack=10, dodge=3,
                   slots={'Staff': 'staff', 'Shield': 'shield'}, loot=WIZARD_LOOT,
                   spell_power=60, mana=5, actions=('Mana Surge',),
                   skills=('Fireball', 'Mend', 'Frost Bolt', 'Arcane Shield', 'Drain Life'),
-                  boon_abilities=('Meteor', 'Time Stop')),
+                  boon_abilities=('Meteor', 'Time Stop'),
+                  growth=Item('Level', 'growth', spell_power=5, max_health=10, mana=1)),
 }
 
 
@@ -150,6 +156,8 @@ class Character:
     health: int
     mana: int
     hero: bool = False  # the player's own character, narrated as "you"
+    level: int = 1
+    xp: int = 0
     equipment: dict = field(default_factory=dict)  # slot name -> Item or None
     boons: list = field(default_factory=list)  # power-ups taken after bosses
     actions: list = field(default_factory=list)  # specials this hero knows
@@ -168,7 +176,9 @@ class Character:
 
     def _bonus(self, stat):
         gear = [item for item in self.equipment.values() if item] + self.boons
-        return sum(getattr(item, stat) for item in gear)
+        levels = (self.level - 1) // 2 if stat == 'mana' else self.level - 1
+        growth = getattr(self.job.growth, stat) * levels if self.job.growth else 0
+        return sum(getattr(item, stat) for item in gear) + growth
 
     @property
     def attack(self):
@@ -221,7 +231,9 @@ def hero_view(character):
     return {'name': character.name, 'job': character.job.name,
             'health': character.health, 'max_health': character.max_health,
             'mana': character.mana, 'max_mana': character.max_mana,
-            'hero': character.hero}
+            'hero': character.hero, 'level': character.level, 'xp': character.xp,
+            'xp_from': LEVEL_XP[character.level - 1],
+            'xp_to': LEVEL_XP[character.level] if character.level < len(LEVEL_XP) else None}
 
 
 def monster_view(monster):
@@ -395,6 +407,7 @@ class Monster:
     attacks: int = 1  # strikes per round
     breath: int = 0  # if set, every third round hits the whole party this hard
     called: str = 'the kobold'  # how the narration refers to it mid-fight
+    xp: int = 0  # experience for the party when slain
     stunned: int = 0  # turns it will lose
     dazed: bool = False  # lost its last turn to a stun
     poison: int = 0  # damage per round from Poison Blade
@@ -406,17 +419,18 @@ class Monster:
 
 
 BESTIARY = {
-    'kobold_miner': Monster('Kobold Miner', health=38, attack=12),
-    'kobold_guard': Monster('Kobold Guardsman', health=61, attack=21),
-    'kobold_heavy': Monster('Kobold Heavy', health=99, attack=29, loot_tier='rare'),
-    'kobold_shaman': Monster('Kobold Shaman', health=77, attack=28),
-    'kobold_dragonguard': Monster('Kobold Dragonguard', health=132, attack=34, loot_tier='rare'),
-    'kobold_leader': Monster('Kobold Leader', health=184, attack=32, boss=True,
+    'kobold_miner': Monster('Kobold Miner', health=38, attack=12, xp=10),
+    'kobold_guard': Monster('Kobold Guardsman', health=61, attack=21, xp=15),
+    'kobold_heavy': Monster('Kobold Heavy', health=129, attack=36, xp=25, loot_tier='rare'),
+    'kobold_shaman': Monster('Kobold Shaman', health=100, attack=35, xp=25),
+    'kobold_dragonguard': Monster('Kobold Dragonguard', health=172, attack=42, xp=35,
+                                  loot_tier='rare'),
+    'kobold_leader': Monster('Kobold Leader', health=258, attack=40, xp=60, boss=True,
                              called='the Leader'),
-    'kobold_warchief': Monster('Kobold Warchief', health=414, attack=34, boss=True, attacks=2,
-                               called='the Warchief'),
-    'red_dragon': Monster('Cinderjaw the Red', health=782, attack=39, boss=True, attacks=2,
-                          breath=30, called='Cinderjaw'),
+    'kobold_warchief': Monster('Kobold Warchief', health=580, attack=42, xp=100, boss=True,
+                               attacks=2, called='the Warchief'),
+    'red_dragon': Monster('Cinderjaw the Red', health=1095, attack=49, boss=True, attacks=2,
+                          breath=38, called='Cinderjaw'),
 }
 
 
@@ -982,37 +996,75 @@ def game_over(party):
     print(f'Kobolds slain: {party.cs}')
 
 
-def offer_skills(job, rng):
-    """Three different basic skills, picked at random from the class's five."""
-    pool = list(job.skills)
-    return [pool.pop(rng.randint(0, len(pool) - 1)) for _ in range(3)]
+def offer_skills(member, count, rng):
+    """`count` different basic skills this hero doesn't know yet, at random."""
+    pool = [name for name in member.job.skills if name not in member.actions]
+    return [pool.pop(rng.randint(0, len(pool) - 1)) for _ in range(min(count, len(pool)))]
 
 
-def choose_skill(character, rng=random, ask=input):
-    options = offer_skills(character.job, rng)
-    print('Every adventurer needs a trick or two. Pick one to take into the mines:')
+def choose_skill(member, rng=random, ask=input, count=3):
+    options = offer_skills(member, count, rng)
+    if not options:
+        return
+    if member.hero and member.level == 1:
+        print('Every adventurer needs a trick or two. Pick one to take into the mines:')
+    else:
+        narrate(member, 'You can learn a new skill:', '{name} can learn a new skill:')
     for name in options:
         print(f'  {name}: {ACTIONS[name].description}')
-    show('skills', job=character.job.name,
+    show('skills', job=member.job.name, who=member.name,
          skills=[{'name': name, 'description': ACTIONS[name].description} for name in options])
     by_name = {name.lower(): name for name in options}
+    who = '' if member.hero else f'{member.name}: '
     while True:
-        answer = ask(f'Which skill? [{" / ".join(options)}] ').strip().lower()
+        answer = ask(f'{who}Which skill? [{" / ".join(options)}] ').strip().lower()
         if answer in by_name:
-            character.actions.append(by_name[answer])
-            print(f'You will go in knowing {by_name[answer]}. It might even help.')
+            member.actions.append(by_name[answer])
+            if member.hero and member.level == 1:
+                print(f'You will go in knowing {by_name[answer]}. It might even help.')
+            else:
+                narrate(member, f'You learn {by_name[answer]}.',
+                        f'{{name}} learns {by_name[answer]}.')
             return
         print('Please select a valid option.')
 
 
-def prisoner(job_key, stage_index, rng=random):
-    """A prisoner comes with basic gear and one random skill."""
+def level_up(member, rng=random, ask=input):
+    """Stats only: max HP and mana rise, and current HP and mana rise by the
+    same amount, but nothing is healed."""
+    old_max_health, old_max_mana = member.max_health, member.max_mana
+    member.level += 1
+    member.health += member.max_health - old_max_health
+    member.mana += member.max_mana - old_max_mana
+    gains = replace(member.job.growth, mana=member.max_mana - old_max_mana).describe()
+    narrate(member, f'You reach level {member.level}! ({gains})',
+            f'{{name}} reaches level {member.level}! ({gains})')
+    if member.level in SKILL_LEVELS:
+        choose_skill(member, rng, ask, count=2)
+
+
+def award_xp(party, monster, rng=random, ask=input):
+    if not monster.xp:
+        return
+    print(f'The party earns {monster.xp} XP.')
+    for member in party.living:
+        member.xp += monster.xp
+        while member.level < len(LEVEL_XP) and member.xp >= LEVEL_XP[member.level]:
+            level_up(member, rng, ask)
+
+
+def prisoner(job_key, stage_index, level=1, rng=random):
+    """A prisoner comes with basic gear, and the skills their level would have
+    taught: one to start, plus one for each skill level they've passed."""
     job = JOBS[job_key]
     member = Character.create(PRISONERS[job_key][stage_index], job)
     for item_key in PRISONER_GEAR[job_key]:
         slot = choose_slot(member, ITEMS[item_key])
         equip(member, slot, ITEMS[item_key])
-    member.actions.append(job.skills[rng.randint(0, len(job.skills) - 1)])
+    member.level, member.xp = level, LEVEL_XP[level - 1]
+    member.health, member.mana = member.max_health, member.max_mana
+    for _ in range(1 + sum(1 for skill_level in SKILL_LEVELS if level >= skill_level)):
+        member.actions += offer_skills(member, 1, rng)
     return member
 
 
@@ -1043,18 +1095,23 @@ def boss_reward(party, stage_index, rng=random, ask=input):
         print('Your party is full, so you let the prisoners go. '
               'The hoard is far too heavy to carry with all of you.')
         return
-    prisoners = [prisoner(job_key, stage_index, rng) for job_key in JOBS]
+    # One prisoner, of a random class, within a level of your hero.
+    job_key = list(JOBS)[rng.randint(0, len(JOBS) - 1)]
+    level = min(max(1, leader.level + rng.randint(-1, 1)), len(LEVEL_XP))
+    prisoners = [prisoner(job_key, stage_index, level, rng)]
     boon, abilities = BOONS[leader.job.name], unlearned_boon_abilities(leader)
-    print('In the corner of the lair is a cage of prisoners, all very keen to leave.')
-    for member in prisoners:
-        print(f'  {member.name} the {member.job.name}, who knows {member.actions[-1]}')
+    caged = prisoners[0]
+    known = [name for name in caged.actions if name in caged.job.skills]
+    print(f'In the corner of the lair sits a cage. Inside is {caged.name} the {caged.job.name} '
+          f'(level {caged.level}), who knows {" and ".join(known)} and is very keen to leave.')
     narrate(leader, f'Or you could leave them and keep the hoard: [{boon.name}] ({boon.describe()})',
             f'Or {{name}} could keep the hoard: [{boon.name}] ({boon.describe()})')
     for ability in abilities:
         print(f'  plus the Boon Ability {ability}: {ACTIONS[ability].description}')
     show('recruit', prisoners=[{**hero_view(member), **job_view(member.job),
                                 'name': member.name, 'job': member.job.name,
-                                'skill': member.actions[-1]}
+                                'skills': [name for name in member.actions
+                                           if name in member.job.skills]}
                                for member in prisoners],
          boon={'name': boon.name, 'describe': boon.describe(), 'for': leader.name,
                'job': leader.job.name},
@@ -1065,7 +1122,7 @@ def boss_reward(party, stage_index, rng=random, ask=input):
     hoard = {name.lower(): name for name in abilities} or {'power up': None}
     labels = [member.name for member in prisoners] + (abilities or ['Power up'])
     while True:
-        answer = ask(f'Free a prisoner, or keep the hoard? [{" / ".join(labels)}] ')
+        answer = ask(f'Free the prisoner, or keep the hoard? [{" / ".join(labels)}] ')
         answer = answer.strip().lower()
         if answer in hoard:
             power_up(leader, hoard[answer])
@@ -1094,6 +1151,7 @@ def clear_stage(party, stage, rng=random, ask=input):
             party.cs += 1
             print('Your enemy has fallen. You may move on.')
             print(f'Creep Score: {party.cs}')
+            award_xp(party, monster, rng, ask)
             search_camp(party, monster, rng, ask)
             find_bandages(party, monster, rng)
             rest(party)
@@ -1111,6 +1169,7 @@ def clear_stage(party, stage, rng=random, ask=input):
     party.cs += 1
     print('')
     print(stage.boss_outro)
+    award_xp(party, boss, rng, ask)
     find_bandages(party, boss, rng)
     return True
 
@@ -1149,7 +1208,7 @@ def main():
             print_job_stats(job)
 
     hero = Character.create(name, choose_job(), hero=True)
-    choose_skill(hero)
+    choose_skill(hero, count=3)
     party = Party([hero])
     show_party('explore', party)
 

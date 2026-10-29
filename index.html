@@ -169,7 +169,7 @@ form { display: flex; gap: 0.5rem; }
 .party.size-3 { gap: 0.4rem; }
 .party.size-3 .what { display: none; }
 .supplies { font-size: 0.75rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--dust-dim); }
-.jobs.recruits { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.jobs.recruits { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 button.job.boon { border-color: rgba(243, 195, 79, 0.45); }
 button.job .lesson { color: var(--gold); }
 .who { font-weight: 700; color: var(--dust); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -199,6 +199,8 @@ button.job .lesson { color: var(--gold); }
 .bar.hp i { background: linear-gradient(var(--hp-hi), var(--hp)); }
 .enemy .bar.hp i { margin-left: auto; background: linear-gradient(#ff7a6e, var(--blood)); }
 .bar.stat i { background: var(--lantern); }
+.bar.xp { height: 0.25rem; }
+.bar.xp i { background: var(--gold); }
 .nums { font-size: 0.8rem; color: var(--dust-dim); font-variant-numeric: tabular-nums; min-width: 3.2rem; }
 .enemy .nums { text-align: left; }
 .pips { display: flex; gap: 0.25rem; }
@@ -316,7 +318,7 @@ function classify(line) {
   if (/actually made it out|collapses onto his pile/.test(line)) return 'victory';
   if (/^You have encountered|blocks your path\. What will you do/.test(line)) return 'encounter';
   if (/You are struck|CRITICAL FAIL|blow to the head|has fallen|You collapse/.test(line)) return 'hurt';
-  if (/is stunned|loses its turn|Boon Ability|refuse|refuses to fall/.test(line)) return 'victory';
+  if (/is stunned|loses its turn|Boon Ability|refuse|refuses to fall|reaches? level/.test(line)) return 'victory';
   if (/^\s*([\w' ]+ HP|Mana): -?\d+(\/\d+)?$/.test(line)) return 'panel';  // drawn in the panel instead
   if (/^Creep Score:/.test(line)) return 'stat';
   return '';

@@ -12,6 +12,11 @@ moves. Every run you're offered 3 of your class's 5 skills and pick 1, so no
 two runs play quite the same. Keeping a boss's hoard teaches a Boon Ability:
 a powerful move with a longer cooldown.
 
+Slain kobolds give the party experience. Each level raises your stats (but
+heals nothing; that's what bandages are for), and levels 2 and 4 each offer a
+choice of 2 new basic skills, so every hero ends a run knowing 3 of their 5.
+A full run reaches about level 6.
+
 | Class   | Gear           | Signature  | Skills (start with 1 of 3)                                         | Boon Abilities          |
 |---------|----------------|------------|--------------------------------------------------------------------|-------------------------|
 | Warrior | Sword & shield | (none)     | Cleave, Shield Bash, Shield Wall, Second Wind, Battle Cry          | Execute, Last Stand     |
@@ -54,11 +59,12 @@ Fights go in rounds: every hero in your party gets orders, then the enemy
 strikes back at one of you. Defending sets up a parry or counterattack if
 you're the one it targets.
 
-After the first two bosses you choose: free a prisoner from the boss's cage
-to join your party (up to three heroes, each knowing one random skill), or
+After the first two bosses you choose: free the prisoner in the boss's cage
+to join your party (one prisoner of a random class, within a level of your
+hero, with the skills that level would have taught; up to three heroes), or
 leave them and keep the hoard, which powers up your hero and teaches the Boon
-Ability you pick. Recruiting never powers you up as well. A fallen companion stays down; the run ends when the
-whole party falls.
+Ability you pick. Recruiting never powers you up as well. A fallen companion
+stays down; the run ends when the whole party falls.
 
 Swords add attack and shields add max HP. When you find something for a full
 slot, you choose whether to swap it in. After every fight you rest, recovering

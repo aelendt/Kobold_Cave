@@ -314,8 +314,14 @@ class StartingSkillTests(unittest.TestCase):
         self.assertEqual(wizard.actions, ['Mana Surge', 'Drain Life'])
 
     def test_prisoners_come_with_a_random_skill(self):
-        recruit = game.prisoner('warrior', 0, FakeRng(4))
+        recruit = game.prisoner('warrior', 0, 1, FakeRng(4))
         self.assertEqual(recruit.actions, ['Battle Cry'])
+
+    def test_higher_level_prisoners_know_more_skills(self):
+        recruit = game.prisoner('rogue', 0, 4, FakeRng(0, 0, 0))
+        self.assertEqual(recruit.level, 4)
+        self.assertEqual(recruit.actions, ['Flee', 'Stunning Strike', 'Poison Blade', 'Smoke Bomb'])
+        self.assertEqual(recruit.health, recruit.max_health)
 
 
 class WarriorSkillTests(unittest.TestCase):
@@ -513,10 +519,61 @@ class WizardSkillTests(unittest.TestCase):
         self.assertEqual(wizard.health, 130)
 
 
+class ExperienceTests(unittest.TestCase):
+    def test_kills_give_xp_to_everyone_standing(self):
+        warrior, rogue = hero(), companion()
+        rogue.health = 0
+        quietly(game.award_xp, party_of(warrior, rogue), kobold(xp=30))
+        self.assertEqual((warrior.xp, rogue.xp), (30, 0))
+
+    def test_level_up_raises_stats_without_healing(self):
+        warrior = hero(skills=['Cleave'])
+        warrior.health = 100
+        quietly(game.award_xp, party_of(warrior), kobold(xp=50), FakeRng(0, 0),
+                answers('shield bash'))
+        growth = game.JOBS['warrior'].growth
+        self.assertEqual(warrior.level, 2)
+        self.assertEqual(warrior.attack, 15 + growth.attack)
+        self.assertEqual(warrior.max_health, 150 + growth.max_health)
+        self.assertEqual(warrior.health, 100 + growth.max_health)  # still just as wounded
+
+    def test_levels_two_and_four_offer_two_new_skills(self):
+        warrior = hero(skills=['Cleave'])
+        prompts = []
+        def ask(prompt):
+            prompts.append(prompt)
+            return prompt[prompt.index('[') + 1:].split(' / ')[0]
+        quietly(game.award_xp, party_of(warrior), kobold(xp=game.LEVEL_XP[-1]),
+                FakeRng(*[0] * 10), ask)
+        self.assertEqual(warrior.level, len(game.LEVEL_XP))
+        self.assertEqual(len(prompts), 2)
+        self.assertTrue(all(prompt.count(' / ') == 1 for prompt in prompts))  # 2 options each
+        basics = [name for name in warrior.actions if name in warrior.job.skills]
+        self.assertEqual(len(basics), 3)  # every hero ends with three basic skills
+
+    def test_wizards_gain_mana_every_other_level(self):
+        wizard = hero('wizard')
+        wizard.level = 3
+        self.assertEqual(wizard.max_mana, 5 + 1)
+        self.assertEqual(wizard.spell_power, 60 + 2 * 5)
+
+    def test_companions_choose_their_own_skills(self):
+        warrior, rogue = hero(), companion(skills=['Twin Strike'])
+        rogue.xp = 40
+        prompts = []
+        def ask(prompt):
+            prompts.append(prompt)
+            return 'smoke bomb'
+        quietly(game.award_xp, party_of(warrior, rogue), kobold(xp=10), FakeRng(1, 1), ask)
+        self.assertTrue(prompts[0].startswith('Mira: Which skill?'))
+        self.assertIn('Smoke Bomb', rogue.actions)
+
+
 class RewardTests(unittest.TestCase):
     def test_freeing_a_prisoner_adds_them_with_gear_and_a_skill(self):
         party = party_of(hero())
-        quietly(game.boss_reward, party, 0, FakeRng(0, 0, 0), answers('ysolde'))
+        # class roll: wizard; level roll: -1 (but never below 1); skill roll
+        quietly(game.boss_reward, party, 0, FakeRng(2, -1, 0), answers('ysolde'))
         recruit = party.members[1]
         self.assertEqual((recruit.name, recruit.job.name), ('Ysolde', 'Wizard'))
         self.assertEqual(recruit.equipment['Staff'], game.ITEMS['apprentice_staff'])
@@ -529,6 +586,7 @@ class RewardTests(unittest.TestCase):
         rogue.health = 0
         party = party_of(hero(), rogue)
         quietly(game.boss_reward, party, 1, FakeRng(0, 0, 0), answers('hilda'))
+        self.assertEqual(len(party.members), 2)
         self.assertEqual([member.name for member in party.members], ['Test', 'Hilda'])
 
     def test_keeping_the_hoard_powers_up_and_teaches_your_pick(self):
@@ -553,8 +611,21 @@ class RewardTests(unittest.TestCase):
 
     def test_recruiting_gives_no_power_up(self):
         warrior = hero()
-        quietly(game.boss_reward, party_of(warrior), 0, FakeRng(0, 0, 0), answers('mira'))
+        quietly(game.boss_reward, party_of(warrior), 0, FakeRng(1, 0, 0), answers('mira'))
         self.assertEqual((warrior.boons, warrior.actions), ([], []))
+
+    def test_only_one_prisoner_is_offered_within_a_level_of_you(self):
+        warrior = hero()
+        warrior.level = 3
+        prompts = []
+        def ask(prompt):
+            prompts.append(prompt)
+            return 'vex'
+        party = party_of(warrior)
+        quietly(game.boss_reward, party, 1, FakeRng(1, 1, 0, 0, 0), ask)
+        self.assertEqual(prompts, ['Free the prisoner, or keep the hoard? '
+                                   '[Vex / Execute / Last Stand] '])
+        self.assertEqual(party.members[1].level, 4)
 
     def test_a_full_party_gets_nothing_extra(self):
         party = party_of(hero(), companion(), companion('wizard', 'Ysolde'))
@@ -575,10 +646,15 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(job.name, 'Wizard')
         self.assertIn('idiot', out)
 
+    def no_xp(self):
+        game.BESTIARY = {key: replace(monster, xp=0) for key, monster in self.bestiary.items()}
+
     def test_slaying_all_three_bosses_wins(self):
+        self.no_xp()
         game.STAGES = tuple(replace(stage, fights=0) for stage in self.stages)
         party = party_of(hero(attack=2000))
-        won, out = captured(game.play, party, FakeRng(0, 0, 0, 0, 0, 0, 0, 0, 0),
+        # boss 1; a prisoner (class, level, skill); boss 2; Vex the rogue; boss 3
+        won, out = captured(game.play, party, FakeRng(0, 0, 0, 0, 0, 1, 0, 0, 0),
                             answers('attack', 'execute', 'attack', 'vex', 'attack'))
         self.assertTrue(won)
         self.assertIn('actually made it out', out)
@@ -586,6 +662,7 @@ class FlowTests(unittest.TestCase):
         self.assertEqual([member.name for member in party.members], ['Test', 'Vex'])
 
     def test_a_win_earns_creep_score_loot_bandages_and_rest(self):
+        self.no_xp()
         game.STAGES = (replace(self.stages[0], fights=1),)
         warrior = hero(attack=1000)
         warrior.health = 100
@@ -626,7 +703,7 @@ class ShowHookTests(unittest.TestCase):
         scenes = dict(self.scenes)
         self.assertIn('skills', scenes)
         recruit = json.loads(scenes['recruit'])
-        self.assertEqual([p['name'] for p in recruit['prisoners']], ['Brann', 'Mira', 'Ysolde'])
+        self.assertEqual([p['name'] for p in recruit['prisoners']], ['Brann'])
         self.assertEqual([a['name'] for a in recruit['abilities']], ['Execute', 'Last Stand'])
 
     def test_class_cards_are_plain_data(self):
