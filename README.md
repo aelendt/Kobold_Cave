@@ -82,8 +82,12 @@ leave them and keep the hoard, which powers up your hero and teaches the Boon
 Ability you pick. Recruiting never powers you up as well. A fallen companion
 stays down; the run ends when the whole party falls.
 
-Swords add attack and shields add max HP. When you find something for a full
-slot, you choose whether to swap it in. Loot gets better the deeper you go:
+Swords add attack and shields add max HP. Loot is rolled for the whole party:
+a camp only turns up things someone standing can use, and you choose who takes
+each find (the list shows what it would replace), or put it in the party bag.
+Anything a hero swaps out goes in the bag too, and you can hand bag items out
+between fights. The bag holds 6 items; when it overflows, the oldest is left
+behind. Loot gets better the deeper you go:
 the Upper Mines turn up Fine and Firebrand gear, the Deep Warrens Firebrand and
 Mithril, and the Hoard Mithril and Dragonbone. Rogues can carry a parrying
 dagger in their off hand instead of a second sword: less attack, more health.
@@ -100,9 +104,9 @@ Every hero also has a trinket slot:
 | Mana Crystal | +2 mana (wizards only) |
 | Troll's Blood Vial | Drink it mid-fight to heal 40% of your max HP; then it's gone |
 
-The first two bosses always drop something special for whoever leads the
-party: the Leader's Junk Crown (+15% damage to bosses), and from the Warchief
-a War Axe, Hand-Axe or Bone-Drum Shield to suit their class. After every fight you rest, recovering
+The first two bosses always drop something special, and you choose which hero
+claims it: the Leader's Junk Crown (+15% damage to bosses), and from the
+Warchief a War Axe, Hand-Axe or Bone-Drum Shield to suit the claimant's class. After every fight you rest, recovering
 some health and all of your mana. You start with two bandages for bigger
 wounds; kobolds drop more now and then, and bosses always do.
 

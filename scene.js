@@ -94,7 +94,7 @@ function fighter({ spriteName, title, subtitle, health, maxHealth, mana, maxMana
   return figure;
 }
 
-function partySide({ party, active, bandages }, scene) {
+function partySide({ party, active, bandages, bag = [] }, scene) {
   const side = element('div', `side party size-${party.length}`);
   party.forEach((member, i) => {
     side.append(fighter({
@@ -114,7 +114,8 @@ function partySide({ party, active, bandages }, scene) {
   previous.party = Object.fromEntries(party.map(member => [member.name, member.health]));
   if (scene === 'victory') side.classList.add('triumph');
   if (bandages !== undefined) {
-    const supplies = element('div', 'supplies', `Bandages: ${bandages}`);
+    const supplies = element('div', 'supplies', `Bandages: ${bandages} · Bag: ${bag.length}`);
+    if (bag.length) supplies.title = bag.join(', ');
     side.append(supplies);
   }
   return side;
