@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Kobold Cave</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&family=IM+Fell+English+SC&display=swap">
+<style>
+/* Layout: one lantern-lit screen. Title bar, a scrolling cave log, and a
+   choice tray pinned at the bottom. Deliberately dark only, it's a cave. */
+:root {
+  --rock: #1b1714;        /* page */
+  --rock-raised: #26201b; /* tray, buttons */
+  --seam: #3a3029;        /* borders, dividers */
+  --dust: #d9cbb6;        /* running text */
+  --dust-dim: #9a8b78;    /* secondary text */
+  --lantern: #f0a73c;     /* accent: prompts, focus, choices */
+  --copper: #d7774a;      /* loot names */
+  --blood: #e0625a;       /* damage, death */
+  --gold: #f4d27a;        /* victory */
+  --font-display: "IM Fell English SC", "Iowan Old Style", Georgia, serif;
+  --font-body: "Courier Prime", "Courier New", ui-monospace, monospace;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: radial-gradient(ellipse 90% 60% at 50% 0%, #2b221b 0%, var(--rock) 70%) var(--rock);
+  color: var(--dust);
+  font: 16px/1.55 var(--font-body);
+}
+.app {
+  height: 100%;
+  max-width: 46rem;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  box-sizing: border-box;
+}
+header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding-block: 1.25rem 0.75rem;
+  border-bottom: 1px solid var(--seam);
+}
+h1 {
+  margin: 0;
+  font: 400 2.1rem/1 var(--font-display);
+  color: var(--lantern);
+  letter-spacing: 0.02em;
+  text-shadow: 0 0 18px rgba(240, 167, 60, 0.35);
+}
+.depth {
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dust-dim);
+}
+#log {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-block: 1rem;
+  overflow-wrap: anywhere;
+}
+#log p { margin: 0; min-height: 1.55em; white-space: pre-wrap; }
+#log .stat { color: var(--dust-dim); font-variant-numeric: tabular-nums; }
+#log .encounter { color: var(--lantern); font-weight: 700; margin-top: 0.4rem; }
+#log .hurt { color: var(--blood); }
+#log .death { color: var(--blood); font-weight: 700; font-size: 1.15rem; }
+#log .victory { color: var(--gold); font-weight: 700; }
+#log .loot { color: var(--copper); font-weight: 700; }
+#log .prompt { color: var(--lantern); }
+#log .answer { color: var(--dust-dim); }
+#log .answer::before { content: "> "; color: var(--lantern); }
+#log .divider {
+  min-height: 0;
+  height: 1px;
+  margin-block: 0.75rem;
+  background: linear-gradient(90deg, transparent, var(--seam) 15%, var(--seam) 85%, transparent);
+  color: transparent;
+  overflow: hidden;
+}
+#log .system { color: var(--dust-dim); font-style: italic; }
+.tray {
+  border-top: 1px solid var(--seam);
+  padding-block: 0.75rem calc(0.75rem + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+#choices { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+#choices:empty { display: none; }
+button {
+  font: 700 0.95rem/1 var(--font-body);
+  color: var(--dust);
+  background: var(--rock-raised);
+  border: 1px solid var(--seam);
+  border-radius: 3px;
+  padding: 0.65rem 0.9rem;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+button:hover { border-color: var(--lantern); color: var(--lantern); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--lantern); outline-offset: 2px; }
+button kbd { font: inherit; font-weight: 400; color: var(--dust-dim); font-size: 0.8rem; }
+button:disabled { opacity: 0.45; cursor: default; border-color: var(--seam); color: var(--dust); }
+form { display: flex; gap: 0.5rem; }
+#answer {
+  flex: 1;
+  min-width: 0;
+  font: 16px var(--font-body);
+  color: var(--dust);
+  background: var(--rock);
+  border: 1px solid var(--seam);
+  border-radius: 3px;
+  padding: 0.6rem 0.75rem;
+}
+#answer::placeholder { color: var(--dust-dim); }
+@media (prefers-reduced-motion: no-preference) {
+  #log p.new { animation: rise 0.25s ease-out; }
+  @keyframes rise { from { opacity: 0.35; transform: translateY(3px); } }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Kobold Cave</h1>
+    <span class="depth" id="status">Lighting the lantern…</span>
+  </header>
+  <div id="log" aria-live="polite">
+    <p class="system">Loading Python in your browser. This takes a few seconds the first time.</p>
+  </div>
+  <div class="tray">
+    <div id="choices"></div>
+    <form id="input-form" autocomplete="off">
+      <input id="answer" aria-label="Your answer" placeholder="Type your answer and press Enter" disabled>
+      <button id="send" type="submit" disabled>Enter</button>
+    </form>
+  </div>
+</div>
+
+<script type="module">
+// Pyodide is tried from a local copy first (see README), then the CDN.
+const PYODIDE_SOURCES = ['./pyodide/', 'https://cdn.jsdelivr.net/npm/pyodide@314.0.7/'];
+
+const log = document.getElementById('log');
+const choices = document.getElementById('choices');
+const form = document.getElementById('input-form');
+const answer = document.getElementById('answer');
+const send = document.getElementById('send');
+const statusLabel = document.getElementById('status');
+
+function escapeHtml(text) {
+  return text.replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+}
+
+function classify(line) {
+  if (/^-{10,}$/.test(line)) return 'divider';
+  if (/GAME OVER|Kobolds slain/.test(line)) return 'death';
+  if (/actually made it out|collapses onto his pile/.test(line)) return 'victory';
+  if (/^You have encountered/.test(line)) return 'encounter';
+  if (/You are struck|CRITICAL FAIL|blow to the head/.test(line)) return 'hurt';
+  if (/^\s*(Hero Current HP|Enemy HP|Creep Score):|^\s*Mana: \d+\/\d+/.test(line)) return 'stat';
+  return '';
+}
+
+function addLine(text, cls = classify(text)) {
+  const p = document.createElement('p');
+  p.className = `${cls} new`.trim();
+  // Item names are printed in [brackets]; give them the loot colour.
+  p.innerHTML = escapeHtml(text).replace(/\[([^\]/]+)\]/g, '<span class="loot">[$1]</span>');
+  log.append(p);
+  log.scrollTop = log.scrollHeight;
+  const cs = text.match(/^Creep Score: (\d+)/);
+  if (cs) statusLabel.textContent = `Kobolds slain: ${cs[1]}`;
+}
+
+// Python's print() arrives here byte by byte; split it into lines.
+let pending = '';
+const decoder = new TextDecoder();
+function writeStdout(bytes) {
+  pending += decoder.decode(bytes, { stream: true });
+  const lines = pending.split('\n');
+  pending = lines.pop();
+  lines.forEach(line => addLine(line));
+  return bytes.length;
+}
+
+// Called from Python's input(). Shows the prompt, turns any [A / B / C]
+// menu into buttons, and resolves with what the player picks or types.
+let resolveAnswer = null;
+window.askPlayer = function (prompt) {
+  const menu = prompt.match(/\[([^\]]+)\]\s*:?\s*$/);
+  const question = (menu ? prompt.slice(0, menu.index) : prompt).trim();
+  if (question) addLine(question, 'prompt');
+
+  choices.replaceChildren();
+  if (menu) {
+    menu[1].split(' / ').forEach((option, i) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.innerHTML = `${i < 9 ? `<kbd>${i + 1}</kbd>` : ''}${escapeHtml(option.trim())}`;
+      button.addEventListener('click', () => submit(option.trim()));
+      choices.append(button);
+    });
+  }
+  answer.disabled = send.disabled = false;
+  answer.placeholder = menu ? 'Pick an option, or type it' : 'Type your answer and press Enter';
+  if (!matchMedia('(pointer: coarse)').matches || !menu) answer.focus();
+  return new Promise(resolve => { resolveAnswer = resolve; });
+};
+
+function submit(text) {
+  if (!resolveAnswer) return;
+  addLine(text, 'answer');
+  choices.replaceChildren();
+  answer.value = '';
+  answer.disabled = send.disabled = true;
+  const resolve = resolveAnswer;
+  resolveAnswer = null;
+  resolve(text);
+}
+
+form.addEventListener('submit', event => {
+  event.preventDefault();
+  submit(answer.value);
+});
+
+// Number keys pick a menu option while the text box is empty.
+document.addEventListener('keydown', event => {
+  if (!resolveAnswer || answer.value || event.ctrlKey || event.metaKey || event.altKey) return;
+  const index = Number(event.key) - 1;
+  const button = choices.children[index];
+  if (button) {
+    event.preventDefault();
+    button.click();
+  }
+});
+
+async function loadRuntime() {
+  let lastError;
+  for (const base of PYODIDE_SOURCES) {
+    try {
+      const { loadPyodide } = await import(base + 'pyodide.mjs');
+      return await loadPyodide({ indexURL: new URL(base, location.href).href });
+    } catch (error) {
+      console.warn(`Could not load Pyodide from ${base}`, error);
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
+
+async function start() {
+  if (!('Suspending' in WebAssembly)) {
+    addLine('This browser cannot pause Python to wait for your answers. Open the game in Chrome 137 or newer.', 'death');
+    statusLabel.textContent = 'Browser not supported';
+    return;
+  }
+
+  let pyodide;
+  try {
+    pyodide = await loadRuntime();
+    const source = await (await fetch('kobold_cave.py', { cache: 'no-cache' })).text();
+    pyodide.FS.writeFile('/home/pyodide/kobold_cave.py', source);
+  } catch (error) {
+    addLine(`The game failed to load: ${error.message}`, 'death');
+    addLine('If you opened index.html straight from disk, serve the folder instead (see README).', 'system');
+    statusLabel.textContent = 'Failed to load';
+    return;
+  }
+  pyodide.setStdout({ write: writeStdout });
+  pyodide.setStderr({ write: writeStdout });
+
+  log.replaceChildren();
+  statusLabel.textContent = 'At the entrance';
+  // Swap input() for one that waits on the page. This must happen before
+  // kobold_cave is imported, because its functions capture input as a default.
+  await pyodide.runPythonAsync(`
+import builtins, sys
+import js
+from pyodide.ffi import run_sync
+
+def web_input(prompt=''):
+    sys.stdout.flush()
+    return run_sync(js.askPlayer(prompt))
+
+builtins.input = web_input
+sys.path.insert(0, '/home/pyodide')
+import kobold_cave
+`);
+
+  while (true) {
+    try {
+      await pyodide.runPythonAsync('kobold_cave.main()\nsys.stdout.flush()');
+    } catch (error) {
+      addLine(String(error.message || error), 'death');
+    }
+    addLine('-'.repeat(20));
+    await new Promise(resolve => {
+      choices.replaceChildren();
+      const again = document.createElement('button');
+      again.type = 'button';
+      again.innerHTML = '<kbd>1</kbd>Descend again';
+      again.addEventListener('click', () => {
+        resolveAnswer = null;
+        log.replaceChildren();
+        statusLabel.textContent = 'At the entrance';
+        resolve();
+      });
+      choices.append(again);
+      resolveAnswer = () => {};  // lets the number-key shortcut reach the button
+      again.focus();
+    });
+  }
+}
+
+start();
+</script>
+</body>
+</html>

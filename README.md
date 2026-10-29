@@ -28,6 +28,22 @@ python3 kobold_cave.py
 
 To see every dice roll, set `DEBUG = True` at the top of `kobold_cave.py`.
 
+### In the browser
+
+`index.html` runs the same `kobold_cave.py` in Chrome using
+[Pyodide](https://pyodide.org) (Python compiled to WebAssembly). Menus become
+buttons, and number keys pick options. Serve the folder, then open
+http://localhost:8000 in Chrome 137 or newer:
+
+```bash
+python3 -m http.server 8000
+```
+
+Opening `index.html` straight from disk won't work, because the browser blocks
+it from reading `kobold_cave.py`. The page loads Pyodide from the jsDelivr CDN;
+to play offline, put a copy of Pyodide (from `npm install pyodide@314.0.7`) in
+a `pyodide/` folder next to `index.html`.
+
 ## Tests
 
 ```bash
