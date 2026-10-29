@@ -7,6 +7,13 @@ const partyPanel = document.getElementById('party-panel');
 const infoPanel = document.getElementById('info-panel');
 let selected = null;  // name of the hero whose tab is open
 let latest = null;  // the last party details, so a tab click can redraw
+let openSlot = null;  // the slot whose Equip list is showing, as "hero|slot"
+let equipHandler = () => {};
+
+// index.html supplies what an Equip choice does (answer the game with it).
+export function onEquip(handler) {
+  equipHandler = handler;
+}
 
 function element(tag, className, text) {
   const el = document.createElement(tag);
@@ -69,11 +76,41 @@ function memberView(member) {
   }
 
   const gear = element('ul', 'gear');
-  member.gear.forEach(({ slot, name, describe }) => {
+  member.gear.forEach(({ slot, name, describe, candidates }) => {
     const row = element('li');
-    row.append(element('span', 'slot', slot),
-               name ? element('span', 'item', name) : element('span', 'empty', 'empty'));
+    const key = `${member.name}|${slot}`;
+    const top = element('div', 'gear-top');
+    top.append(name ? element('span', 'item', name) : element('span', 'empty', 'empty'));
+    if (candidates.length && member.health > 0) {
+      const button = element('button', 'equip', openSlot === key ? 'Close' : `Equip (${candidates.length})`);
+      button.type = 'button';
+      button.setAttribute('aria-expanded', String(openSlot === key));
+      if (latest.in_fight) {
+        button.disabled = true;
+        button.title = 'No changing gear in the middle of a fight';
+      }
+      button.addEventListener('click', () => {
+        openSlot = openSlot === key ? null : key;
+        drawPartyPanel();
+      });
+      top.append(button);
+    }
+    row.append(element('span', 'slot', slot), top);
     if (describe) row.append(element('span', 'what', describe));
+    if (openSlot === key && !latest.in_fight) {
+      const options = element('div', 'equip-options');
+      candidates.forEach(item => {
+        const pick = element('button', 'equip-option');
+        pick.type = 'button';
+        pick.append(element('span', 'item', item.name), element('span', 'what', item.describe));
+        pick.addEventListener('click', () => {
+          openSlot = null;
+          equipHandler(member.name, slot, item.index);
+        });
+        options.append(pick);
+      });
+      row.append(options);
+    }
     gear.append(row);
   });
   view.append(section('Gear', gear));
@@ -183,12 +220,12 @@ export function drawInfoPanel(details) {
   }
   blocks.push(section('Supplies', definitions([['Gold', details.gold], ['Scrap', details.scrap],
                                                ['Bandages', details.bandages],
-                                               ['Bag', `${details.bag.length} / 6`]]), bag));
+                                               ['Bag', `${details.bag.length} / ${details.bag_size}`]]), bag));
   infoPanel.replaceChildren(...blocks);
 }
 
 export function clearPanels() {
-  selected = latest = null;
+  selected = latest = openSlot = null;
   partyPanel.replaceChildren(element('h2', 'panel-title', 'Party'),
                              element('p', 'what', 'Your hero appears here once you choose a class.'));
   infoPanel.replaceChildren(element('h2', 'panel-title', 'Field notes'),

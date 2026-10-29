@@ -10,7 +10,7 @@ BANDAGE_HEAL = 0.4  # fraction of max HP a bandage restores
 MEND_POWER = 0.5  # Mend heals this fraction of the caster's spell power
 START_BANDAGES = 2
 MAX_PARTY = 3
-BAG_SIZE = 6  # spare items the party can carry; the oldest falls out when it's full
+BAG_SIZE = 8  # spare items the party can carry; the oldest falls out when it's full
 FORGE_LIMIT = 3  # how many times one item can be reforged
 LEVEL_XP = (0, 50, 120, 220, 350, 520, 720, 950)  # total XP needed to reach each level
 SKILL_LEVELS = (2, 4)  # level-ups that also teach a basic skill (1 of 2 offered)
@@ -333,6 +333,7 @@ class Party:
     gold: int = 0  # spent at traders
     scrap: int = 0  # salvaged from old gear, spent at forges
     bag_changed: bool = False  # something went in since the bag was last offered
+    in_fight: bool = False  # gear can't be changed mid-fight
     smoke: bool = False  # Smoke Bomb: every strike misses this round
     shielded: bool = False  # Arcane Shield: damage is halved this round
 
@@ -346,7 +347,8 @@ class Party:
 
 
 def show_party(scene, party, monster=None, active=None, **extra):
-    show(scene, **party_details(party, monster, active), **extra)
+    """Returns True when a graphical front end is drawing (see show)."""
+    return show(scene, **party_details(party, monster, active), **extra)
 
 
 def party_details(party, monster=None, active=None):
@@ -357,7 +359,15 @@ def party_details(party, monster=None, active=None):
                'depth': party.depth, 'kills': party.kills,
                'stages': [{'name': stage.name, 'fights': stage.fights,
                            'boss': BESTIARY[stage.boss].name} for stage in STAGES],
-               'gold': party.gold, 'scrap': party.scrap}
+               'gold': party.gold, 'scrap': party.scrap, 'in_fight': party.in_fight,
+               'bag_size': BAG_SIZE}
+    # For the party panel's Equip buttons: which bag items fit each slot.
+    for member, view in zip(party.members, details['party']):
+        for gear in view['gear']:
+            gear['candidates'] = [
+                {'index': index, 'name': item.name, 'describe': item.describe()}
+                for index, item in enumerate(party.bag)
+                if member.alive and gear['slot'] in slots_for(member, item)]
     if monster:
         details['enemy'] = monster_view(monster)
     return details
@@ -373,29 +383,6 @@ def print_status(party, monster):
 
 
 # --- Equipment ------------------------------------------------------------
-
-def choose_slot(character, item, ask=input):
-    """Return the slot to put the item in, or None to leave it behind."""
-    slots = [slot for slot, kinds in character.job.slots.items() if item.kind in kinds]
-    for slot in slots:
-        if character.equipment[slot] is None:
-            return slot
-    if not slots:
-        return None
-
-    for slot in slots:
-        current = character.equipment[slot]
-        print(f'{slot:>11}: [{current.name}] ({current.describe()})')
-    options = {slot.lower(): slot for slot in slots}
-    menu = f'[{" / ".join(slots)} / Keep] '
-    while True:
-        answer = ask(f'Replace which? {menu}').strip().lower()
-        if answer == 'keep':
-            return None
-        if answer in options:
-            return options[answer]
-        print('Please select a valid option.')
-
 
 def equip(character, slot, item):
     """Put an item in a slot. Bigger max HP or mana also tops you up by
@@ -441,7 +428,7 @@ def search_camp(party, monster, rng=random, ask=input):
         return 'Nothing of worth'
     a = 'an' if item.name[0] in 'AEIOU' else 'a'
     print(f'You search the kobolds camp and find {a} [{item.name}] ({item.describe()}).')
-    return f'{item.name}: {hand_out(party, item, ask)}'
+    return f'{item.name}: {take(party, item)}'
 
 
 def stow(party, item):
@@ -454,69 +441,82 @@ def stow(party, item):
         print(f'The bag is full, so you leave the [{dropped.name}] behind.')
 
 
-def wearing(member, item):
-    """What the item would replace, for the 'who takes it' list."""
-    slots = [slot for slot, kinds in member.job.slots.items() if item.kind in kinds]
-    current = [member.equipment[slot] for slot in slots]
-    if None in current:
-        return 'an empty slot'
-    return ' or '.join(f'[{gear.name}] ({gear.describe()})' for gear in current)
+def take(party, item):
+    """A find goes straight into an empty slot if any hero has one it fits,
+    otherwise into the bag. Returns where it went, for the spoils card."""
+    for member in party.living:
+        if not fits(member, item):
+            continue
+        for slot, kinds in member.job.slots.items():
+            if item.kind in kinds and member.equipment[slot] is None:
+                equip(member, slot, item)
+                narrate(member, f'You equip the [{item.name}].',
+                        f'{{name}} equips the [{item.name}].')
+                return f'to {member.name}'
+    stow(party, item)
+    return 'into the bag'
 
 
-def hand_out(party, item, ask=input):
-    """Let the player choose who takes an item, or put it in the bag.
-    Returns where it went, for the spoils card."""
-    takers = [member for member in party.living if fits(member, item)]
-    for member in takers:
-        print(f'  {member.name} the {member.job.name} would replace {wearing(member, item)}')
-    options = {member.name.lower(): member for member in takers}
-    labels = [member.name for member in takers] + ['Bag', 'Leave']
-    while True:
-        answer = ask(f'Who takes the [{item.name}]? [{" / ".join(labels)}] ').strip().lower()
-        if answer == 'leave':
-            print(f'You leave the [{item.name}] behind.')
-            return 'left behind'
-        if answer == 'bag':
-            stow(party, item)
-            return 'into the bag'
-        if answer in options:
-            receive(party, options[answer], item, ask)
-            return f'to {options[answer].name}'
-        print('Please select a valid option.')
+def slots_for(member, item):
+    if not fits(member, item):
+        return []
+    return [slot for slot, kinds in member.job.slots.items() if item.kind in kinds]
 
 
-def receive(party, member, item, ask=input):
-    """Equip an item. Choosing this hero already said what it replaces, so
-    only ask again when it fits more than one full slot (a rogue's hands).
-    Whatever comes off goes in the party bag."""
-    slots = [slot for slot, kinds in member.job.slots.items() if item.kind in kinds]
-    slot = slots[0] if len(slots) == 1 else choose_slot(member, item, ask)
-    if slot is None:
-        stow(party, item)
-        return
+def equip_from_bag(party, member, slot, item):
+    """Swap a bag item into a hero's slot; whatever comes off goes in the bag."""
+    party.bag.remove(item)
     old = member.equipment[slot]
     equip(member, slot, item)
     narrate(member, f'You equip the [{item.name}].', f'{{name}} equips the [{item.name}].')
     if old:
-        stow(party, old)
+        party.bag.append(old)
+        print(f'The [{old.name}] goes in the bag.')
+
+
+def gear_command(party, command):
+    """An Equip button in the browser's party panel: 'equip', hero, slot and
+    bag position, separated by \\x1f. Refused mid-fight."""
+    action, name, slot, index = command.split('\x1f')
+    if party.in_fight:
+        print('There is no time to change gear in the middle of a fight.')
+        return
+    member = next((m for m in party.living if m.name == name), None)
+    index = int(index)
+    if action != 'equip' or not member or not 0 <= index < len(party.bag) \
+            or slot not in slots_for(member, party.bag[index]):
+        print('That does not fit.')
+        return
+    equip_from_bag(party, member, slot, party.bag[index])
+    show_party('inventory', party)
 
 
 def open_bag(party, ask=input):
-    """Between fights: hand out items from the bag."""
+    """For the terminal, which has no party panel: equip things from the bag."""
+    party.bag_changed = False
     while party.bag and party.alive:
-        party.bag_changed = False
         print('In the bag: ' + ', '.join(f'[{item.name}] ({item.describe()})'
                                          for item in party.bag))
-        names = [item.name for item in party.bag]
-        options = {name.lower(): index for index, name in enumerate(names)}
-        answer = ask(f'Hand something out? [{" / ".join(names)} / Done] ').strip().lower()
-        if answer == 'done':
+        name = choose(ask, 'Equip something from the bag?',
+                      [item.name for item in party.bag] + ['Done'])
+        if name == 'Done':
             return
-        if answer not in options:
-            print('Please select a valid option.')
+        item = next(item for item in party.bag if item.name == name)
+        takers = [member for member in party.living if slots_for(member, item)]
+        if not takers:
+            print(f'Nobody can use the [{item.name}].')
             continue
-        item = party.bag.pop(options[answer])
-        hand_out(party, item, ask)
+        member = takers[0]
+        if len(takers) > 1:
+            name = choose(ask, 'Who takes it?', [m.name for m in takers])
+            member = next(m for m in takers if m.name == name)
+        slots = slots_for(member, item)
+        for slot in slots:
+            current = member.equipment[slot]
+            print(f'{slot:>11}: ' + (f'[{current.name}] ({current.describe()})'
+                                     if current else 'empty'))
+        slot = slots[0] if len(slots) == 1 else choose(ask, 'Which slot?', slots)
+        equip_from_bag(party, member, slot, item)
 
 
 def find_bandages(party, monster, rng=random):
@@ -1428,6 +1428,14 @@ def fight(party, monster, rng=random, ask=input):
     for member in party.members:
         member.cooldowns, member.used = {}, set()
         member.rallied = member.last_stand = member.hexed = member.burning = member.reeling = 0
+    party.in_fight = True
+    try:
+        return fight_rounds(party, monster, rng, ask)
+    finally:
+        party.in_fight = False
+
+
+def fight_rounds(party, monster, rng, ask):
     round_number = 0
     while party.alive and monster.health > 0:
         round_number += 1
@@ -1670,11 +1678,11 @@ def after_victory(party, monster, rng=random, ask=input, camp=True):
     found = search_camp(party, monster, rng, ask) if camp else 'No camp to search'
     bandages = find_bandages(party, monster, rng)
     healing = rest(party)
-    show_party('spoils', party, spoils={
+    drawn = show_party('spoils', party, spoils={
         'monster': monster.name, 'xp': monster.xp, 'levelled': levelled, 'gold': gold,
         'found': found, 'bandages': bandages, 'healing': healing})
     offer_bandages(party, ask)
-    if party.bag_changed:
+    if party.bag_changed and not drawn:
         open_bag(party, ask)
     print('-----------------------------------------------------')
 
@@ -1728,7 +1736,7 @@ def visit_forge(party, ask=input):
         show_party('forge', party, forge={
             'scrap': party.scrap,
             'salvage': [{'name': item.name, 'scrap': scrap_value(item)} for item in party.bag],
-            'reforge': [{'label': label, 'cost': item.forged + 1,
+            'reforge': [{'label': label, 'cost': item.forged + 2,
                          'into': reforged(item).describe()}
                         for label, (_, _, item) in forgeable.items()]})
         print(f'Scrap: {party.scrap}')
@@ -1757,12 +1765,12 @@ def visit_forge(party, ask=input):
             continue
         for label, (_, _, item) in forgeable.items():
             print(f'  {label} -> +{item.forged + 1} ({reforged(item).describe()}), '
-                  f'{item.forged + 1} scrap')
+                  f'{item.forged + 2} scrap')
         label = choose(ask, 'Reforge what?', list(forgeable) + ['Back'])
         if label == 'Back':
             continue
         member, slot, item = forgeable[label]
-        cost = item.forged + 1
+        cost = item.forged + 2
         if party.scrap < cost:
             print(f'That needs {cost} scrap, and you have {party.scrap}.')
             continue
@@ -1843,7 +1851,7 @@ def visit_trader(party, rng=random, ask=input):
                     f'{{name}} studies the tome and learns {skill}.')
         else:
             print(f'You buy the [{wares.name}].')
-            hand_out(party, wares, ask)
+            take(party, wares)
 
 
 def dark_tunnel(party, stage, kills, rng=random, ask=input):
@@ -1856,7 +1864,7 @@ def dark_tunnel(party, stage, kills, rng=random, ask=input):
         item = roll_loot(party.living, stage.loot['common'], rng)
         if item:
             print(f'Under the coins lies a [{item.name}] ({item.describe()}).')
-            hand_out(party, item, ask)
+            take(party, item)
         return
     print('The tunnel was a trap. Kobolds pour out of the walls, and they strike first!')
     # Ambushers come from the stage's toughest kobolds.
@@ -1898,11 +1906,22 @@ def claim_boss_drop(party, boss, ask=input):
     item = ITEMS[drops[claimant.job.name]]
     narrate(claimant, f'Among the wreckage you find the [{item.name}] ({item.describe()}).',
             f'Among the wreckage {{name}} finds the [{item.name}] ({item.describe()}).')
-    receive(party, claimant, item, ask)
+    slot = next((slot for slot in slots_for(claimant, item)
+                 if claimant.equipment[slot] is None), None)
+    if slot:
+        equip(claimant, slot, item)
+        narrate(claimant, f'You equip the [{item.name}].', f'{{name}} equips the [{item.name}].')
+    else:
+        stow(party, item)
+
+
+current_party = None  # the party being played, for the browser's Equip buttons
 
 
 def play(party, rng=random, ask=input):
     """Play every stage. Returns True if the party slays the dragon."""
+    global current_party
+    current_party = party
     for stage_index, stage in enumerate(STAGES):
         if not clear_stage(party, stage, rng, ask):
             game_over(party)
@@ -1910,9 +1929,9 @@ def play(party, rng=random, ask=input):
         if stage_index < len(STAGES) - 1:
             boss_reward(party, stage_index, rng, ask)
             rest(party)
-            show_party('explore', party)
+            drawn = show_party('explore', party)
             offer_bandages(party, ask)
-            if party.bag_changed:
+            if party.bag_changed and not drawn:
                 open_bag(party, ask)
             print('-----------------------------------------------------')
 

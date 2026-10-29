@@ -62,10 +62,12 @@ def boss(health=200, attack=30, **details):
                         called='the Boss', **details)
 
 
-def give(member, item_key, *replies):
-    """Hand a hero an item, as if they'd been chosen to take it."""
+def give(member, item_key, slot=None):
+    """Equip an item from the bag, as the party panel's Equip button does."""
     party = party_of(member)
-    quietly(game.receive, party, member, game.ITEMS[item_key], answers(*replies))
+    item = game.ITEMS[item_key]
+    party.bag.append(item)
+    quietly(game.equip_from_bag, party, member, slot or game.slots_for(member, item)[0], item)
     return party
 
 
@@ -125,10 +127,18 @@ class TableTests(unittest.TestCase):
 
 
 class EquipmentTests(unittest.TestCase):
-    def test_first_sword_is_equipped_automatically(self):
+    def test_a_find_fills_an_empty_slot_by_itself(self):
         warrior = hero()
-        give(warrior, 'fine_sword')
-        self.assertEqual(warrior.attack, 20)
+        party = party_of(warrior)
+        self.assertEqual(quietly(game.take, party, game.ITEMS['fine_sword']), 'to Test')
+        self.assertEqual((warrior.attack, party.bag), (20, []))
+
+    def test_a_find_for_full_slots_goes_in_the_bag(self):
+        warrior = hero()
+        game.equip(warrior, 'Weapon', game.ITEMS['mithril_blade'])
+        party = party_of(warrior)
+        self.assertEqual(quietly(game.take, party, game.ITEMS['fine_sword']), 'into the bag')
+        self.assertEqual(party.bag, [game.ITEMS['fine_sword']])
 
     def test_shield_raises_max_and_current_health(self):
         warrior = hero()
@@ -143,13 +153,11 @@ class EquipmentTests(unittest.TestCase):
         self.assertEqual(warrior.attack, 15 + 10)
         self.assertEqual(party.bag, [game.ITEMS['fine_sword']])  # the old sword is kept
 
-    def test_rogues_pick_a_hand_or_keep_both_swords(self):
+    def test_rogues_choose_which_hand(self):
         rogue = hero('rogue')
         game.equip(rogue, 'Main hand', game.ITEMS['fine_sword'])
         game.equip(rogue, 'Off hand', game.ITEMS['firebrand'])
-        party = give(rogue, 'mithril_blade', 'nonsense', 'keep')
-        self.assertEqual(party.bag, [game.ITEMS['mithril_blade']])
-        party = give(rogue, 'mithril_blade', 'main hand')
+        party = give(rogue, 'mithril_blade', 'Main hand')
         self.assertEqual(rogue.equipment['Main hand'], game.ITEMS['mithril_blade'])
         self.assertEqual(party.bag, [game.ITEMS['fine_sword']])
 
@@ -162,14 +170,15 @@ class EquipmentTests(unittest.TestCase):
 
     def test_rogue_dual_wields(self):
         rogue = hero('rogue')
-        give(rogue, 'fine_sword')
-        give(rogue, 'firebrand')
+        party = party_of(rogue)
+        quietly(game.take, party, game.ITEMS['fine_sword'])
+        quietly(game.take, party, game.ITEMS['firebrand'])
         self.assertEqual(rogue.attack, 12 + 5 + 10)
 
     def test_rogue_off_hand_takes_a_parrying_dagger(self):
         rogue = hero('rogue')
         game.equip(rogue, 'Main hand', game.ITEMS['firebrand'])
-        give(rogue, 'parrying_dagger')
+        quietly(game.take, party_of(rogue), game.ITEMS['parrying_dagger'])
         self.assertEqual(rogue.equipment['Off hand'], game.ITEMS['parrying_dagger'])
         self.assertEqual((rogue.attack, rogue.max_health), (12 + 10 + 4, 120 + 35))
 
@@ -207,40 +216,31 @@ class EquipmentTests(unittest.TestCase):
         self.assertEqual(best, sorted(best))
         self.assertEqual(best[-1], 4)
 
-    def test_you_choose_who_takes_a_find(self):
+    def test_camp_finds_go_to_whoever_has_room_without_asking(self):
         warrior, wizard = hero(), companion('wizard', 'Ysolde')
-        prompts = []
-        def ask(prompt):
-            prompts.append(prompt)
-            return 'ysolde'
         # tier 1 on the Upper Mines table; the third tier-1 item the party can use
-        quietly(game.search_camp, party_of(warrior, wizard), kobold(), FakeRng(8, 2), ask)
-        self.assertEqual(prompts, ['Who takes the [Apprentice Staff]? [Ysolde / Bag / Leave] '])
+        found = quietly(game.search_camp, party_of(warrior, wizard), kobold(), FakeRng(8, 2),
+                        answers())
+        self.assertEqual(found, 'Apprentice Staff: to Ysolde')
         self.assertEqual(wizard.equipment['Staff'], game.ITEMS['apprentice_staff'])
 
-    def test_anyone_can_take_a_trinket(self):
+    def test_a_trinket_goes_to_the_first_hero_with_a_free_trinket_slot(self):
         warrior, rogue = hero(), companion()
-        party = party_of(warrior, rogue)
-        quietly(game.hand_out, party, game.ITEMS['lucky_coin'], answers('mira'))
-        self.assertEqual(rogue.trinket, game.ITEMS['lucky_coin'])
+        game.equip(warrior, 'Trinket', game.ITEMS['lucky_coin'])
+        quietly(game.take, party_of(warrior, rogue), game.ITEMS['vampires_fang'])
+        self.assertEqual(rogue.trinket, game.ITEMS['vampires_fang'])
 
 
 class BagTests(unittest.TestCase):
-    def test_finds_can_go_in_the_bag_or_be_left(self):
-        party = party_of(hero())
-        quietly(game.hand_out, party, game.ITEMS['trolls_blood'], answers('bag'))
-        quietly(game.hand_out, party, game.ITEMS['fine_sword'], answers('leave'))
-        self.assertEqual(party.bag, [game.ITEMS['trolls_blood']])
-
     def test_a_full_bag_drops_its_oldest_item(self):
         party = party_of(hero())
         for key in ('fine_sword', 'fine_shield', 'firebrand', 'thick_shield', 'mithril_blade',
-                    'mithril_buckler', 'lucky_coin'):
+                    'mithril_buckler', 'lucky_coin', 'apprentice_staff', 'ember_staff'):
             quietly(game.stow, party, game.ITEMS[key])
         self.assertEqual(len(party.bag), game.BAG_SIZE)
         self.assertNotIn(game.ITEMS['fine_sword'], party.bag)
 
-    def test_hand_out_from_the_bag_between_fights(self):
+    def test_the_terminal_equips_from_the_bag_between_fights(self):
         warrior, rogue = hero(), companion()
         party = party_of(warrior, rogue)
         party.bag = [game.ITEMS['trolls_blood'], game.ITEMS['fine_shield']]
@@ -254,9 +254,52 @@ class BagTests(unittest.TestCase):
         game.equip(warrior, 'Trinket', game.ITEMS['lucky_coin'])
         party = party_of(warrior)
         party.bag = [game.ITEMS['trolls_blood']]
-        quietly(game.open_bag, party, answers("troll's blood vial", 'test', 'done'))
+        quietly(game.open_bag, party, answers("troll's blood vial", 'done'))
         self.assertEqual(warrior.trinket, game.ITEMS['trolls_blood'])
         self.assertEqual(party.bag, [game.ITEMS['lucky_coin']])
+
+    def test_the_equip_button_swaps_gear_from_the_bag(self):
+        warrior = hero()
+        game.equip(warrior, 'Weapon', game.ITEMS['fine_sword'])
+        party = party_of(warrior)
+        party.bag = [game.ITEMS['lucky_coin'], game.ITEMS['mithril_blade']]
+        quietly(game.gear_command, party, 'equip\x1fTest\x1fWeapon\x1f1')
+        self.assertEqual(warrior.equipment['Weapon'], game.ITEMS['mithril_blade'])
+        self.assertEqual(party.bag, [game.ITEMS['lucky_coin'], game.ITEMS['fine_sword']])
+
+    def test_no_changing_gear_mid_fight(self):
+        warrior = hero()
+        party = party_of(warrior)
+        party.bag = [game.ITEMS['mithril_blade']]
+        party.in_fight = True
+        _, out = captured(game.gear_command, party, 'equip\x1fTest\x1fWeapon\x1f0')
+        self.assertIn('no time to change gear', out)
+        self.assertIsNone(warrior.equipment['Weapon'])
+
+    def test_an_equip_that_does_not_fit_is_refused(self):
+        warrior = hero()
+        party = party_of(warrior)
+        party.bag = [game.ITEMS['apprentice_staff']]
+        _, out = captured(game.gear_command, party, 'equip\x1fTest\x1fWeapon\x1f0')
+        self.assertIn('does not fit', out)
+        self.assertEqual(party.bag, [game.ITEMS['apprentice_staff']])
+
+    def test_fights_lock_gear_and_unlock_it_after(self):
+        party = party_of(hero(attack=200))
+        seen = []
+        quietly(game.fight, party, kobold(), FakeRng(0),
+                lambda prompt: seen.append(party.in_fight) or 'attack')
+        self.assertEqual((seen, party.in_fight), ([True], False))
+
+    def test_the_panel_knows_which_bag_items_fit_each_slot(self):
+        warrior = hero()
+        party = party_of(warrior)
+        party.bag = [game.ITEMS['apprentice_staff'], game.ITEMS['firebrand'],
+                     game.ITEMS['lucky_coin']]
+        gear = {row['slot']: row for row in game.party_details(party)['party'][0]['gear']}
+        self.assertEqual([c['name'] for c in gear['Weapon']['candidates']], ['Firebrand Sword'])
+        self.assertEqual([c['index'] for c in gear['Trinket']['candidates']], [2])
+        self.assertEqual(gear['Shield']['candidates'], [])
 
 
 class TrinketTests(unittest.TestCase):
@@ -316,7 +359,7 @@ class TrinketTests(unittest.TestCase):
     def test_bosses_drop_a_unique_for_the_hero_who_claims_it(self):
         rogue = hero('rogue')
         quietly(game.claim_boss_drop, party_of(rogue), game.spawn('kobold_warchief'),
-                answers('main hand'))
+                answers())
         self.assertIn(game.ITEMS['hand_axe'], rogue.equipment.values())
         quietly(game.claim_boss_drop, party_of(rogue), game.spawn('kobold_leader'))
         self.assertEqual(rogue.trinket, game.ITEMS['junk_crown'])
@@ -324,7 +367,7 @@ class TrinketTests(unittest.TestCase):
     def test_in_a_party_you_choose_who_claims_the_prize(self):
         warrior, wizard = hero(), companion('wizard', 'Ysolde')
         quietly(game.claim_boss_drop, party_of(warrior, wizard), game.spawn('kobold_warchief'),
-                answers('ysolde'))
+                answers('ysolde'))  # who claims it; it fills Ysolde's empty shield slot
         self.assertEqual(wizard.equipment['Shield'], game.ITEMS['drum_shield'])
 
     def test_junk_crown_hits_bosses_harder(self):
@@ -938,7 +981,7 @@ class ForgeTests(unittest.TestCase):
         warrior = hero()
         game.equip(warrior, 'Weapon', game.ITEMS['firebrand'])
         party = party_of(warrior)
-        party.scrap = 3  # the first reforge costs 1 scrap, the second 2
+        party.scrap = 5  # the first reforge costs 2 scrap, the second 3
         quietly(game.visit_forge, party, answers('reforge', "test's firebrand sword",
                                                  'reforge', "test's firebrand sword +1", 'leave'))
         self.assertEqual(warrior.equipment['Weapon'].name, 'Firebrand Sword +2')
@@ -952,13 +995,13 @@ class ForgeTests(unittest.TestCase):
         game.equip(warrior, 'Shield', maxed)
         game.equip(warrior, 'Weapon', game.ITEMS['fine_sword'])
         party = party_of(warrior)
-        party.scrap = 0
+        party.scrap = 1
         prompts = []
         def ask(prompt):
             prompts.append(prompt)
             return ['reforge', "test's fine sword", 'leave'][len(prompts) - 1]
         _, out = captured(game.visit_forge, party, ask)
-        self.assertIn('That needs 1 scrap', out)
+        self.assertIn('That needs 2 scrap', out)
         self.assertNotIn('Fine Shield', prompts[1])  # already +3
 
 
@@ -975,7 +1018,7 @@ class TraderTests(unittest.TestCase):
         party = party_of(warrior)
         party.gold = 36
         quietly(game.visit_trader, party, FakeRng(0, 0),
-                answers('bandage', "troll's blood vial", 'test', 'bandage', 'leave'))
+                answers('bandage', "troll's blood vial", 'bandage', 'leave'))
         self.assertEqual(party.bandages, game.START_BANDAGES + 2)
         self.assertEqual(warrior.trinket, game.ITEMS['trolls_blood'])
         self.assertEqual(party.gold, 36 - 8 - 20 - 8)
@@ -1016,9 +1059,9 @@ class ForkTests(unittest.TestCase):
     def test_the_dark_tunnel_can_hide_a_cache(self):
         party = party_of(hero())
         # cache roll, then common loot: a trinket (rolls 6-7), the first one
-        quietly(game.dark_tunnel, party, game.STAGES[0], 3, FakeRng(1, 6, 0), answers('bag'))
+        quietly(game.dark_tunnel, party, game.STAGES[0], 3, FakeRng(1, 6, 0), answers())
         self.assertEqual(party.gold, 20)
-        self.assertEqual(len(party.bag), 1)
+        self.assertIsNotNone(party.members[0].trinket)
 
     def test_the_dark_tunnel_can_be_an_ambush(self):
         party = party_of(hero(attack=1000))
@@ -1069,7 +1112,7 @@ class FlowTests(unittest.TestCase):
         # encounter: miner; one hit; tier 1 gear, the Fine Shield, which the hero takes;
         # a bandage drop; then the boss, who drops the Junk Crown
         won = quietly(game.play, party, FakeRng(5, 0, 8, 1, 1, 0),
-                      answers('attack', 'test', 'no', 'attack'))
+                      answers('attack', 'no', 'attack'))
         self.assertTrue(won)
         self.assertEqual(party.cs, 2)
         self.assertEqual(warrior.max_health, 175)
@@ -1118,7 +1161,8 @@ class ShowHookTests(unittest.TestCase):
         member = details['party'][0]
         self.assertEqual(member['spell_power'], 60)
         self.assertIn({'slot': 'Trinket', 'name': 'Lucky Coin',
-                       'describe': game.ITEMS['lucky_coin'].describe()}, member['gear'])
+                       'describe': game.ITEMS['lucky_coin'].describe(), 'candidates': []},
+                      member['gear'])
         skills = {skill['name']: skill for skill in member['skills']}
         self.assertEqual(skills['Mana Surge']['kind'], 'signature')
         self.assertEqual(skills['Meteor']['kind'], 'boon')
