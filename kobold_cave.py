@@ -167,6 +167,10 @@ class Character:
     shield_wall: bool = False  # drawing every strike this round
     rallied: int = 0  # rounds of Battle Cry left
     last_stand: int = 0  # rounds of Last Stand left
+    hexed: int = 0  # rounds of dealing 25% less damage (Shaman's Hex)
+    burning: int = 0  # rounds of fire damage left (Fire Spear)
+    burn: int = 0  # damage per round while burning
+    reeling: int = 0  # turns to lose (Dirty Trick, Wing Buffet)
 
     @classmethod
     def create(cls, name, job, hero=False):
@@ -233,12 +237,32 @@ def hero_view(character):
             'mana': character.mana, 'max_mana': character.max_mana,
             'hero': character.hero, 'level': character.level, 'xp': character.xp,
             'xp_from': LEVEL_XP[character.level - 1],
-            'xp_to': LEVEL_XP[character.level] if character.level < len(LEVEL_XP) else None}
+            'xp_to': LEVEL_XP[character.level] if character.level < len(LEVEL_XP) else None,
+            'effects': hero_effects(character)}
+
+
+def hero_effects(member):
+    return [label for label, on in (('Hexed', member.hexed), ('Burning', member.burning),
+                                    ('Reeling', member.reeling),
+                                    ('Battle Cry', member.rallied),
+                                    ('Last Stand', member.last_stand)) if on]
+
+
+def monster_effects(monster):
+    effects = [label for label, on in (('Stunned', monster.stunned),
+                                       ('Poisoned', monster.poison_rounds),
+                                       ('Shield Up', monster.guarding), ('Rallied', monster.fury),
+                                       ('War Drums', monster.enraged),
+                                       ('Berserk', monster.berserk)) if on]
+    if monster.charging:
+        effects.append(f'Winding up: {monster.charging}')
+    return effects
 
 
 def monster_view(monster):
     return {'name': monster.name, 'health': monster.health,
-            'max_health': monster.max_health, 'boss': monster.boss}
+            'max_health': monster.max_health, 'boss': monster.boss,
+            'effects': monster_effects(monster)}
 
 
 def narrate(member, you, them):
@@ -405,13 +429,23 @@ class Monster:
     loot_tier: str = 'common'
     boss: bool = False
     attacks: int = 1  # strikes per round
-    breath: int = 0  # if set, every third round hits the whole party this hard
+    breath: int = 0  # Fire Breath damage
     called: str = 'the kobold'  # how the narration refers to it mid-fight
     xp: int = 0  # experience for the party when slain
+    abilities: tuple = ()  # basic abilities, see MONSTER_ABILITIES
+    signature: str = ''  # a boss's signature ability
     stunned: int = 0  # turns it will lose
     dazed: bool = False  # lost its last turn to a stun
     poison: int = 0  # damage per round from Poison Blade
     poison_rounds: int = 0
+    guarding: bool = False  # Shield Up: takes half damage until its next turn
+    fury: int = 0  # Rally: strikes left at +50%
+    enraged: int = 0  # War Drums: turns left at +30% attack
+    berserk: bool = False
+    charging: str = ''  # an announced ability it will use on its next turn
+    signature_used: bool = False
+    breath_timer: int = 0  # turns since Fire Breath
+    cooldowns: dict = field(default_factory=dict)  # ability name -> turns left
     max_health: int = 0  # filled in from health
 
     def __post_init__(self):
@@ -419,24 +453,31 @@ class Monster:
 
 
 BESTIARY = {
-    'kobold_miner': Monster('Kobold Miner', health=38, attack=12, xp=10),
-    'kobold_guard': Monster('Kobold Guardsman', health=61, attack=21, xp=15),
-    'kobold_heavy': Monster('Kobold Heavy', health=129, attack=36, xp=25, loot_tier='rare'),
-    'kobold_shaman': Monster('Kobold Shaman', health=100, attack=35, xp=25),
-    'kobold_dragonguard': Monster('Kobold Dragonguard', health=172, attack=42, xp=35,
-                                  loot_tier='rare'),
-    'kobold_leader': Monster('Kobold Leader', health=258, attack=40, xp=60, boss=True,
-                             called='the Leader'),
-    'kobold_warchief': Monster('Kobold Warchief', health=580, attack=42, xp=100, boss=True,
-                               attacks=2, called='the Warchief'),
-    'red_dragon': Monster('Cinderjaw the Red', health=1095, attack=49, boss=True, attacks=2,
-                          breath=38, called='Cinderjaw'),
+    'kobold_miner': Monster('Kobold Miner', health=40, attack=13, xp=10,
+                            abilities=('Rock Toss',)),
+    'kobold_guard': Monster('Kobold Guardsman', health=64, attack=22, xp=15,
+                            abilities=('Shield Up',)),
+    'kobold_heavy': Monster('Kobold Heavy', health=135, attack=38, xp=25, loot_tier='rare',
+                            abilities=('Crushing Blow',)),
+    'kobold_shaman': Monster('Kobold Shaman', health=105, attack=37, xp=25,
+                             abilities=('Hex',)),
+    'kobold_dragonguard': Monster('Kobold Dragonguard', health=181, attack=44, xp=35,
+                                  loot_tier='rare', abilities=('Fire Spear',)),
+    'kobold_leader': Monster('Kobold Leader', health=284, attack=42, xp=60, boss=True,
+                             called='the Leader', abilities=('Dirty Trick', 'Rally'),
+                             signature='Junk Avalanche'),
+    'kobold_warchief': Monster('Kobold Warchief', health=638, attack=44, xp=100, boss=True,
+                               attacks=2, called='the Warchief',
+                               abilities=('War Drums', 'Sweeping Axe'), signature='Berserk'),
+    'red_dragon': Monster('Cinderjaw the Red', health=1204, attack=51, boss=True, attacks=2,
+                          breath=40, called='Cinderjaw',
+                          abilities=('Tail Sweep', 'Wing Buffet'), signature='Fire Breath'),
 }
 
 
 def spawn(monster_key):
     """Return a fresh copy so damage never leaks into the bestiary."""
-    return replace(BESTIARY[monster_key])
+    return replace(BESTIARY[monster_key], cooldowns={})
 
 
 # --- Stages ---------------------------------------------------------------
@@ -558,10 +599,21 @@ def choose_ally(party, ask, question):
         print('Please select a valid option.')
 
 
+def dealt(member, monster, damage):
+    """Damage a hero's blow or spell actually does: 25% less while hexed,
+    and half against an enemy behind Shield Up."""
+    if member.hexed:
+        damage *= 0.75
+    if monster.guarding:
+        damage *= 0.5
+    return round(damage)
+
+
 def strike(member, monster, damage, you, them):
     """A weapon blow. Battle Cry makes these 50% stronger."""
     if member.rallied:
         damage = round(damage * 1.5)
+    damage = dealt(member, monster, damage)
     monster.health -= damage
     narrate(member, you.format(target=monster.called, damage=damage),
             them.format(name='{name}', target=monster.called, damage=damage))
@@ -721,8 +773,10 @@ def cast_fireball(member, party, monster, rng, ask):
     elif roll <= 3:
         print(f"The fireball passes harmlessly over {monster.called}'s head.")
     else:
-        print(f'The fireball hits {monster.called} square in the chest. The enemy is staggered.')
-        monster.health -= power
+        damage = dealt(member, monster, power)
+        print(f'The fireball hits {monster.called} square in the chest for {damage} damage. '
+              'The enemy is staggered.')
+        monster.health -= damage
 
 
 def mend(member, party, monster, rng, ask):
@@ -736,7 +790,7 @@ def mend(member, party, monster, rng, ask):
 
 
 def frost_bolt(member, party, monster, rng, ask):
-    damage = round(member.spell_power * 0.45)
+    damage = dealt(member, monster, member.spell_power * 0.45)
     monster.health -= damage
     print(f'A shard of ice slams into {monster.called} for {damage} damage.')
     if monster.health > 0 and rng.randint(1, 3) == 1:
@@ -745,14 +799,14 @@ def frost_bolt(member, party, monster, rng, ask):
 
 def arcane_shield(member, party, monster, rng, ask):
     party.shielded = True
-    damage = round(member.spell_power * 0.6)
+    damage = dealt(member, monster, member.spell_power * 0.6)
     monster.health -= damage
     print('A shimmering shield wraps the party. Damage is halved this round. '
           f'It flares outward and burns {monster.called} for {damage} damage.')
 
 
 def drain_life(member, party, monster, rng, ask):
-    damage = round(member.spell_power * 0.4)
+    damage = dealt(member, monster, member.spell_power * 0.4)
     monster.health -= damage
     healed = heal(member, damage // 2)
     narrate(member, f'You drain {damage} life from {monster.called} and recover {healed} HP.',
@@ -760,7 +814,7 @@ def drain_life(member, party, monster, rng, ask):
 
 
 def meteor(member, party, monster, rng, ask):
-    damage = member.spell_power * 2
+    damage = dealt(member, monster, member.spell_power * 2)
     monster.health -= damage
     print(f'A meteor tears through the ceiling and lands on {monster.called} '
           f'for {damage} damage.')
@@ -835,35 +889,246 @@ ACTIONS = {action.name: action for action in (
 )}
 
 
-def monster_strikes(target, monster, rng, halved=False):
-    damage = monster.attack + rng.randint(-3, 3)
+def monster_damage(monster, rng, scale=1.0):
+    damage = monster.attack * scale
+    if monster.enraged:
+        damage *= 1.3
+    if monster.fury:
+        damage *= 1.5
+        monster.fury -= 1
+    return round(damage) + rng.randint(-3, 3)
+
+
+def monster_strikes(target, monster, rng, halved=False, scale=1.0, parry=True, dodge=True):
+    """One blow at one hero. Returns True if it landed."""
+    damage = monster_damage(monster, rng, scale)
     if halved:
         damage //= 2
-    if target.defending:
+    if target.defending and parry:
         roll = rng.randint(1, 10)
         debug(f'Defend Roll: {roll}')
         if roll <= 5:
             narrate(target, "You parry the enemy's blow.", "{name} parries the enemy's blow.")
-        elif roll <= 9:
-            counter = round(target.attack / 2 + rng.randint(-3, 0))
+            return False
+        if roll <= 9:
+            counter = dealt(target, monster, target.attack / 2 + rng.randint(-3, 0))
             monster.health -= counter
             narrate(target, 'You parry the enemy attack and stagger the enemy. Taking advantage '
                             f'of the situation you manage a counterattack for {counter} damage.',
                     '{name} parries and staggers the enemy, then counterattacks '
                     f'for {counter} damage.')
-        else:
-            narrate(target, 'You fail to defend against the enemy attack',
-                    '{name} fails to defend against the enemy attack')
-            hit(target, damage)
-        return
-    dodge_roll = target.dodge + rng.randint(-2, 3)
-    debug(f'Dodge Roll: {dodge_roll}')
-    if dodge_roll >= 4:
-        attacker = capitalised(monster.called)
-        narrate(target, f'{attacker} swings at you and misses.',
-                f'{attacker} swings at {{name}} and misses.')
-    else:
+            return False
+        narrate(target, 'You fail to defend against the enemy attack',
+                '{name} fails to defend against the enemy attack')
         hit(target, damage)
+        return True
+    if dodge:
+        dodge_roll = target.dodge + rng.randint(-2, 3)
+        debug(f'Dodge Roll: {dodge_roll}')
+        if dodge_roll >= 4:
+            attacker = capitalised(monster.called)
+            narrate(target, f'{attacker} swings at you and misses.',
+                    f'{attacker} swings at {{name}} and misses.')
+            return False
+    hit(target, damage)
+    return True
+
+
+def target_of(party, rng):
+    """Shield Wall draws every blow; otherwise the monster picks at random."""
+    walls = [member for member in party.living if member.shield_wall]
+    return walls[0] if walls else pick(party.living, rng)
+
+
+def area_attack(party, monster, base, rng, you, them, dodgeable=False):
+    """Hits every hero. Defending or Arcane Shield halves it."""
+    for member in party.living:
+        if dodgeable and member.dodge + rng.randint(-2, 3) >= 4:
+            narrate(member, 'You leap clear.', '{name} leaps clear.')
+            continue
+        damage = round(base) + rng.randint(-3, 3)
+        if party.shielded:
+            damage //= 2
+        if member.defending:
+            damage //= 2
+        wound(member, damage, you.format(damage=damage), them.format(name='{name}', damage=damage))
+
+
+# Kobold abilities
+
+def rock_toss(party, monster, rng):
+    target = target_of(party, rng)
+    print(f'{capitalised(monster.called)} hurls a rock. It can\'t be parried.')
+    monster_strikes(target, monster, rng, party.shielded, scale=0.7, parry=False)
+
+
+def shield_up(party, monster, rng):
+    monster.guarding = True
+    print(f'{capitalised(monster.called)} raises its shield. '
+          'Your blows will do half damage until its next turn.')
+
+
+def crushing_blow(party, monster, rng):
+    target = target_of(party, rng)
+    print(f'{capitalised(monster.called)} brings its maul crashing down. It can\'t be dodged!')
+    monster_strikes(target, monster, rng, party.shielded, scale=1.5, dodge=False)
+
+
+def hex_curse(party, monster, rng):
+    target = pick(party.living, rng)
+    target.hexed = 3  # counts down at the end of this round, so it covers two of your rounds
+    narrate(target, f'{capitalised(monster.called)} hexes you. You deal 25% less damage '
+                    'for 2 rounds.',
+            f'{capitalised(monster.called)} hexes {{name}}. They deal 25% less damage '
+            'for 2 rounds.')
+
+
+def fire_spear(party, monster, rng):
+    target = target_of(party, rng)
+    if monster_strikes(target, monster, rng, party.shielded) and target.alive:
+        target.burning, target.burn = 2, round(monster.attack * 0.3)
+        narrate(target, 'The spear sets you alight.', 'The spear sets {name} alight.')
+
+
+# Boss abilities
+
+def dirty_trick(party, monster, rng):
+    target = pick(party.living, rng)
+    if target.dodge + rng.randint(-2, 3) >= 4:
+        narrate(target, 'The Leader throws a fistful of sand. You turn away just in time.',
+                'The Leader throws a fistful of sand. {name} turns away just in time.')
+        return
+    target.reeling = 1
+    narrate(target, 'The Leader throws sand in your eyes. You will lose your next turn.',
+            "The Leader throws sand in {name}'s eyes. They will lose their next turn.")
+
+
+def rally(party, monster, rng):
+    monster.fury = 2
+    print(f'{capitalised(monster.called)} bellows for his kin. His next two blows will '
+          'hit 50% harder.')
+
+
+def junk_avalanche(party, monster, rng):
+    print('The throne of junk comes crashing down on the party!')
+    area_attack(party, monster, monster.attack * 1.2, rng,
+                'You are buried under junk for {damage} damage.',
+                '{name} is buried under junk for {damage} damage.')
+
+
+def war_drums(party, monster, rng):
+    monster.enraged = 4  # counts down at the end of this turn: three more turns of fury
+    print(f'War drums pound. {capitalised(monster.called)} hits 30% harder for 3 rounds.')
+
+
+def sweeping_axe(party, monster, rng):
+    print(f'{capitalised(monster.called)} swings his axe in a wide arc.')
+    targets = [target_of(party, rng)]
+    others = [member for member in party.living if member is not targets[0]]
+    if targets[0].shield_wall:
+        targets.append(targets[0])  # the shield wall takes both blows
+    elif others:
+        targets.append(pick(others, rng))
+    for target in targets:
+        if target.alive:
+            monster_strikes(target, monster, rng, party.shielded)
+
+
+def tail_sweep(party, monster, rng):
+    print('Cinderjaw sweeps its tail across the cavern.')
+    area_attack(party, monster, monster.attack * 0.6, rng,
+                'The tail catches you for {damage} damage.',
+                'The tail catches {name} for {damage} damage.', dodgeable=True)
+
+
+def wing_buffet(party, monster, rng):
+    target = target_of(party, rng)
+    print('Cinderjaw beats its wings.')
+    if monster_strikes(target, monster, rng, party.shielded, scale=0.5) and target.alive:
+        target.reeling = 1
+        narrate(target, 'You are knocked flat and will lose your next turn.',
+                '{name} is knocked flat and will lose their next turn.')
+
+
+def fire_breath(party, monster, rng):
+    print(f'{monster.name} breathes a roaring torrent of fire!')
+    area_attack(party, monster, monster.breath, rng,
+                'You are scorched for {damage} damage.',
+                '{name} is scorched for {damage} damage.')
+
+
+@dataclass(frozen=True)
+class MonsterAbility:
+    name: str
+    perform: object  # function(party, monster, rng)
+    description: str
+    cooldown: int = 3
+    warning: str = ''  # if set, announced a turn ahead with this line
+
+
+MONSTER_ABILITIES = {ability.name: ability for ability in (
+    MonsterAbility('Rock Toss', rock_toss, 'A weaker hit that cannot be parried.'),
+    MonsterAbility('Shield Up', shield_up, 'Takes half damage until its next turn.'),
+    MonsterAbility('Crushing Blow', crushing_blow, 'A heavy hit that cannot be dodged.',
+                   warning='{monster} raises its maul high overhead.'),
+    MonsterAbility('Hex', hex_curse, 'One hero deals 25% less damage for 2 rounds.'),
+    MonsterAbility('Fire Spear', fire_spear, 'A hit that sets a hero burning for 2 rounds.'),
+    MonsterAbility('Dirty Trick', dirty_trick, 'Sand in the eyes: a hero loses their next turn.'),
+    MonsterAbility('Rally', rally, 'His next two blows hit 50% harder.'),
+    MonsterAbility('Junk Avalanche', junk_avalanche, 'Signature: brings his throne down on the '
+                                                     'whole party, once, below half health.',
+                   warning='The Leader grabs a leg of his throne of junk and starts to heave.'),
+    MonsterAbility('War Drums', war_drums, 'Hits 30% harder for 3 rounds.', cooldown=5),
+    MonsterAbility('Sweeping Axe', sweeping_axe, 'Strikes two heroes at once.'),
+    MonsterAbility('Berserk', None, 'Signature: below 30% health he attacks three times a round.'),
+    MonsterAbility('Tail Sweep', tail_sweep, 'A lighter hit on the whole party.'),
+    MonsterAbility('Wing Buffet', wing_buffet, 'Knocks a hero flat: they lose their next turn.'),
+    MonsterAbility('Fire Breath', fire_breath, 'Signature: fire over the whole party every third '
+                                               'turn, every other turn below half health.',
+                   warning='Cinderjaw draws in a long, rumbling breath.'),
+)}
+
+
+def wind_up(monster, name):
+    """Announce a big move; the monster uses it on its next turn."""
+    monster.charging = name
+    warning = MONSTER_ABILITIES[name].warning.format(monster=capitalised(monster.called))
+    print(f'{warning} Brace yourselves!')
+
+
+def monster_act(party, monster, rng):
+    """Pick and perform the monster's move for this turn."""
+    half = monster.health <= monster.max_health * 0.5
+    if monster.signature == 'Berserk' and not monster.berserk \
+            and monster.health <= monster.max_health * 0.3:
+        monster.berserk, monster.attacks = True, 3
+        print(f'{capitalised(monster.called)} flies into a berserk rage! '
+              'He will attack three times a round.')
+    if monster.signature == 'Junk Avalanche' and half and not monster.signature_used:
+        monster.signature_used = True
+        wind_up(monster, 'Junk Avalanche')
+        return
+    if monster.signature == 'Fire Breath':
+        monster.breath_timer += 1
+        if monster.breath_timer >= (2 if half else 3):
+            monster.breath_timer = 0
+            wind_up(monster, 'Fire Breath')
+            return
+
+    monster.cooldowns = {name: turns - 1 for name, turns in monster.cooldowns.items() if turns > 1}
+    ready = [name for name in monster.abilities if name not in monster.cooldowns]
+    if ready and rng.randint(1, 2 if monster.boss else 3) == 1:
+        ability = MONSTER_ABILITIES[pick(ready, rng)]
+        monster.cooldowns[ability.name] = ability.cooldown
+        if ability.warning:
+            wind_up(monster, ability.name)
+        else:
+            ability.perform(party, monster, rng)
+        return
+
+    for _ in range(monster.attacks):
+        if party.alive and monster.health > 0:
+            monster_strikes(target_of(party, rng), monster, rng, halved=party.shielded)
 
 
 def end_round(party):
@@ -873,39 +1138,41 @@ def end_round(party):
         member.defending = member.shield_wall = False
         member.rallied = max(0, member.rallied - 1)
         member.last_stand = max(0, member.last_stand - 1)
+        member.hexed = max(0, member.hexed - 1)
         member.cooldowns = {name: rounds - 1 for name, rounds in member.cooldowns.items()
                             if rounds > 1}
 
 
 def monster_turn(party, monster, round_number, rng):
-    monster.dazed = False
+    monster.dazed = monster.guarding = False
     if monster.poison_rounds:
         monster.poison_rounds -= 1
         monster.health -= monster.poison
         print(f'Poison burns through {monster.called} for {monster.poison} damage.')
+    for member in party.living:
+        if member.burning:
+            member.burning -= 1
+            wound(member, member.burn, f'You burn for {member.burn} damage.',
+                  f'{{name}} burns for {member.burn} damage.')
     called = capitalised(monster.called)
-    if monster.health <= 0:
+    if monster.health <= 0 or not party.alive:
         pass
     elif monster.stunned:
         monster.stunned -= 1
         monster.dazed = True
+        if monster.charging:
+            print(f'The stun breaks its concentration: no {monster.charging} this time.')
+            monster.charging = ''
         print(f'{called} is still reeling and loses its turn.')
     elif party.smoke:
         print(f'{called} lashes out blindly into the smoke and hits nothing.')
-    elif monster.breath and round_number % 3 == 0:
-        print(f'{monster.name} breathes a roaring torrent of fire!')
-        for member in party.living:
-            damage = monster.breath + rng.randint(-3, 3)
-            if party.shielded:
-                damage //= 2
-            wound(member, damage, f'You are scorched for {damage} damage.',
-                  f'{{name}} is scorched for {damage} damage.')
+        monster.charging = ''
+    elif monster.charging:
+        name, monster.charging = monster.charging, ''
+        MONSTER_ABILITIES[name].perform(party, monster, rng)
     else:
-        for _ in range(monster.attacks):
-            if party.alive and monster.health > 0:
-                walls = [member for member in party.living if member.shield_wall]
-                target = walls[0] if walls else pick(party.living, rng)
-                monster_strikes(target, monster, rng, halved=party.shielded)
+        monster_act(party, monster, rng)
+    monster.enraged = max(0, monster.enraged - 1)
     end_round(party)
 
 
@@ -956,7 +1223,7 @@ def fight(party, monster, rng=random, ask=input):
         print(f'{monster.name} blocks your path. What will you do?')
     for member in party.members:
         member.cooldowns, member.used = {}, set()
-        member.rallied = member.last_stand = 0
+        member.rallied = member.last_stand = member.hexed = member.burning = member.reeling = 0
     round_number = 0
     while party.alive and monster.health > 0:
         round_number += 1
@@ -966,6 +1233,11 @@ def fight(party, monster, rng=random, ask=input):
             if not member.alive:  # a misfire can drop someone mid-round
                 continue
             show_party('combat', party, monster, active=member)
+            if member.reeling:
+                member.reeling -= 1
+                narrate(member, 'You are still reeling and lose your turn.',
+                        '{name} is still reeling and loses their turn.')
+                continue
             if take_turn(member, party, monster, rng, ask):
                 end_round(party)
                 show_party('explore', party)

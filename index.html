@@ -200,6 +200,19 @@ button.job .lesson { color: var(--gold); }
 .enemy .bar.hp i { margin-left: auto; background: linear-gradient(#ff7a6e, var(--blood)); }
 .bar.stat i { background: var(--lantern); }
 .bar.xp { height: 0.25rem; }
+.effects { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+.enemy .effects { justify-content: flex-end; }
+.chip {
+  font-size: 0.65rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.1rem 0.3rem;
+  border-radius: 2px;
+  color: var(--dust);
+  background: var(--seam);
+}
+.chip.warning { color: var(--rock); background: var(--blood); }
+#log .warning { color: var(--rock); background: var(--blood); padding-inline: 0.3rem; font-weight: 700; }
 .bar.xp i { background: var(--gold); }
 .nums { font-size: 0.8rem; color: var(--dust-dim); font-variant-numeric: tabular-nums; min-width: 3.2rem; }
 .enemy .nums { text-align: left; }
@@ -314,10 +327,11 @@ function escapeHtml(text) {
 
 function classify(line) {
   if (/^-{10,}$/.test(line)) return 'divider';
+  if (/Brace yourselves!$/.test(line)) return 'warning';
   if (/GAME OVER|Kobolds slain/.test(line)) return 'death';
   if (/actually made it out|collapses onto his pile/.test(line)) return 'victory';
   if (/^You have encountered|blocks your path\. What will you do/.test(line)) return 'encounter';
-  if (/You are struck|CRITICAL FAIL|blow to the head|has fallen|You collapse/.test(line)) return 'hurt';
+  if (/You are struck|CRITICAL FAIL|blow to the head|^[\w' ]+ has fallen\.$|You collapse/.test(line)) return 'hurt';
   if (/is stunned|loses its turn|Boon Ability|refuse|refuses to fall|reaches? level/.test(line)) return 'victory';
   if (/^\s*([\w' ]+ HP|Mana): -?\d+(\/\d+)?$/.test(line)) return 'panel';  // drawn in the panel instead
   if (/^Creep Score:/.test(line)) return 'stat';

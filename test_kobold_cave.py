@@ -276,9 +276,10 @@ class CombatTests(unittest.TestCase):
         quietly(game.monster_turn, party_of(warrior), boss(attacks=2), 1, FakeRng(0, 0, 0, 0))
         self.assertEqual(warrior.health, 150 - 60)
 
-    def test_dragon_breath_hits_everyone_every_third_round(self):
+    def test_dragon_breath_hits_everyone(self):
         warrior, rogue = hero(), companion()
-        quietly(game.monster_turn, party_of(warrior, rogue), boss(breath=30), 3, FakeRng(0, 0))
+        dragon = boss(breath=30, signature='Fire Breath', charging='Fire Breath')
+        quietly(game.monster_turn, party_of(warrior, rogue), dragon, 4, FakeRng(0, 0))
         self.assertEqual((warrior.health, rogue.health), (120, 90))
 
     def test_the_fight_goes_on_when_a_companion_falls(self):
@@ -517,6 +518,122 @@ class WizardSkillTests(unittest.TestCase):
         for round_number in (1, 2):
             quietly(game.monster_turn, party, monster, round_number, FakeRng())
         self.assertEqual(wizard.health, 130)
+
+
+class MonsterAbilityTests(unittest.TestCase):
+    def test_every_monster_ability_exists(self):
+        for monster in game.BESTIARY.values():
+            for name in monster.abilities + ((monster.signature,) if monster.signature else ()):
+                self.assertIn(name, game.MONSTER_ABILITIES, monster.name)
+            self.assertEqual(len(monster.abilities), 2 if monster.boss else 1, monster.name)
+
+    def test_rock_toss_cannot_be_parried(self):
+        warrior = hero()
+        warrior.defending = True
+        # ability roll 1 (of 3), damage roll 0, dodge roll -2 (fails)
+        quietly(game.monster_turn, party_of(warrior), kobold(abilities=('Rock Toss',)), 1,
+                FakeRng(1, 0, -2))
+        self.assertEqual(warrior.health, 150 - 7)
+
+    def test_abilities_wait_out_their_cooldown(self):
+        warrior, monster = hero(), kobold(abilities=('Rock Toss',))
+        party = party_of(warrior)
+        quietly(game.monster_turn, party, monster, 1, FakeRng(1, 0, -2))
+        # on cooldown: no ability roll, just a normal blow
+        quietly(game.monster_turn, party, monster, 2, FakeRng(0, -2))
+        self.assertEqual(warrior.health, 150 - 7 - 10)
+
+    def test_shield_up_halves_your_damage_until_its_next_turn(self):
+        warrior, monster = hero(), kobold(abilities=('Shield Up',))
+        party = party_of(warrior)
+        quietly(game.monster_turn, party, monster, 1, FakeRng(1))
+        turn(warrior, party, monster, [0], 'attack')
+        self.assertEqual(monster.health, 35 - 8)
+
+    def test_crushing_blow_is_announced_then_cannot_be_dodged(self):
+        warrior, monster = hero(), kobold(abilities=('Crushing Blow',))
+        party = party_of(warrior)
+        _, out = captured(game.monster_turn, party, monster, 1, FakeRng(1))
+        self.assertIn('Brace yourselves!', out)
+        self.assertEqual((warrior.health, monster.charging), (150, 'Crushing Blow'))
+        quietly(game.monster_turn, party, monster, 2, FakeRng(0))  # damage roll only
+        self.assertEqual(warrior.health, 150 - 15)
+
+    def test_a_stun_interrupts_a_wind_up(self):
+        warrior, monster = hero(), kobold(charging='Crushing Blow', stunned=1)
+        _, out = captured(game.monster_turn, party_of(warrior), monster, 1, FakeRng())
+        self.assertIn('no Crushing Blow this time', out)
+        self.assertEqual((warrior.health, monster.charging), (150, ''))
+
+    def test_smoke_wastes_a_wind_up(self):
+        warrior, monster = hero(), kobold(charging='Crushing Blow')
+        party = party_of(warrior)
+        party.smoke = True
+        quietly(game.monster_turn, party, monster, 1, FakeRng())
+        self.assertEqual((warrior.health, monster.charging), (150, ''))
+
+    def test_defending_halves_an_area_attack(self):
+        warrior, rogue = hero(), companion()
+        warrior.defending = True
+        leader = boss(attack=30, signature='Junk Avalanche', charging='Junk Avalanche')
+        quietly(game.monster_turn, party_of(warrior, rogue), leader, 1, FakeRng(0, 0))
+        self.assertEqual((warrior.health, rogue.health), (150 - 18, 120 - 36))
+
+    def test_junk_avalanche_comes_once_below_half_health(self):
+        leader = boss(health=200, signature='Junk Avalanche')
+        leader.health = 99
+        party = party_of(hero())
+        quietly(game.monster_turn, party, leader, 1, FakeRng())
+        self.assertEqual(leader.charging, 'Junk Avalanche')
+        quietly(game.monster_turn, party, leader, 2, FakeRng(0))
+        quietly(game.monster_turn, party, leader, 3, FakeRng(0, -2))  # a normal blow after
+        self.assertEqual(leader.charging, '')
+
+    def test_hex_weakens_a_hero(self):
+        warrior, monster = hero(), kobold(health=100, abilities=('Hex',))
+        party = party_of(warrior)
+        quietly(game.monster_turn, party, monster, 1, FakeRng(1))
+        self.assertTrue(warrior.hexed)
+        turn(warrior, party, monster, [0], 'attack')
+        self.assertEqual(monster.health, 100 - 11)
+
+    def test_fire_spear_sets_you_burning(self):
+        warrior, monster = hero(), kobold(attack=20, abilities=('Fire Spear',))
+        party = party_of(warrior)
+        quietly(game.monster_turn, party, monster, 1, FakeRng(1, 0, -2))
+        self.assertEqual((warrior.health, warrior.burning), (130, 2))
+        quietly(game.monster_turn, party, monster, 2, FakeRng(0, 1))  # burns, then a miss
+        self.assertEqual(warrior.health, 130 - 6)
+
+    def test_dirty_trick_costs_you_a_turn(self):
+        warrior = hero(attack=200)
+        warrior.reeling = 1
+        prompts = []
+        def ask(prompt):
+            prompts.append(prompt)
+            return 'attack'
+        won = quietly(game.fight, party_of(warrior), kobold(), FakeRng(0, 1, 0), ask)
+        self.assertTrue(won)
+        self.assertEqual(len(prompts), 1)  # the first round was lost
+
+    def test_sweeping_axe_hits_two_heroes(self):
+        warrior, rogue = hero(), companion()
+        quietly(game.sweeping_axe, party_of(warrior, rogue), boss(), FakeRng(0, 0, -2, 0, -2))
+        self.assertEqual((warrior.health, rogue.health), (120, 90))
+
+    def test_the_warchief_goes_berserk_below_30_percent(self):
+        warrior, warchief = hero(), boss(health=100, signature='Berserk')
+        warchief.health = 25
+        quietly(game.monster_turn, party_of(warrior), warchief, 1,
+                FakeRng(0, -2, 0, -2, 0, -2))
+        self.assertEqual(warrior.health, 150 - 90)
+        self.assertIn('Berserk', game.monster_view(warchief)['effects'])
+
+    def test_fire_breath_is_announced_every_third_turn(self):
+        dragon = boss(signature='Fire Breath', breath=30, breath_timer=2)
+        quietly(game.monster_turn, party_of(hero()), dragon, 3, FakeRng())
+        self.assertEqual(dragon.charging, 'Fire Breath')
+        self.assertIn('Winding up: Fire Breath', game.monster_view(dragon)['effects'])
 
 
 class ExperienceTests(unittest.TestCase):

@@ -47,7 +47,7 @@ function bar(kind, value, max, from = value) {
 }
 
 function fighter({ spriteName, title, subtitle, health, maxHealth, mana, maxMana, before, boss, active,
-                   xp }) {
+                   xp, effects = [] }) {
   const figure = element('figure', 'fighter');
   if (active) figure.classList.add('active');
   if ((SPRITES[spriteName]?.length || 16) > 16) figure.classList.add('big');
@@ -77,6 +77,12 @@ function fighter({ spriteName, title, subtitle, health, maxHealth, mana, maxMana
     for (let i = 0; i < maxMana; i++) pips.append(element('i', i < mana ? 'full' : ''));
     caption.append(pips);
   }
+  if (effects.length) {
+    const chips = element('div', 'effects');
+    effects.forEach(effect => chips.append(
+      element('span', effect.startsWith('Winding up') ? 'chip warning' : 'chip', effect)));
+    caption.append(chips);
+  }
   if (xp) {
     // A thin bar of progress through the current level.
     const progress = xp.to ? (xp.now - xp.from) / (xp.to - xp.from) : 1;
@@ -96,6 +102,7 @@ function partySide({ party, active, bandages }, scene) {
       title: member.name || 'Nameless',
       subtitle: `${member.job} · Lv ${member.level}`,
       xp: { now: member.xp, from: member.xp_from, to: member.xp_to },
+      effects: member.effects,
       health: member.health,
       maxHealth: member.max_health,
       mana: member.mana,
@@ -124,6 +131,7 @@ function enemySide(enemy, scene) {
       maxHealth: enemy.max_health,
       before: previous.enemy,
       boss: enemy.boss,
+      effects: enemy.effects,
     }));
     previous.enemy = enemy.health;
   } else {

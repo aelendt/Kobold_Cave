@@ -57,7 +57,23 @@ spell power or mana.
 
 Fights go in rounds: every hero in your party gets orders, then the enemy
 strikes back at one of you. Defending sets up a parry or counterattack if
-you're the one it targets.
+you're the one it targets, and halves attacks that hit the whole party.
+
+The kobolds fight back with abilities of their own, and bosses have two plus a
+signature move. Big moves are announced a turn ahead ("Brace yourselves!"):
+stun the enemy to interrupt it, throw a Smoke Bomb to waste it, or Defend,
+Shield Wall or Arcane Shield to soften it.
+
+| Enemy | Abilities | Signature |
+|---|---|---|
+| Kobold Miner | Rock Toss (can't be parried) | |
+| Kobold Guardsman | Shield Up (takes half damage until its next turn) | |
+| Kobold Heavy | Crushing Blow (announced; can't be dodged) | |
+| Kobold Shaman | Hex (a hero deals 25% less for 2 rounds) | |
+| Kobold Dragonguard | Fire Spear (sets a hero burning) | |
+| Kobold Leader | Dirty Trick (a hero loses a turn), Rally (+50% on his next two blows) | Junk Avalanche: below half health, announced, hits everyone |
+| Kobold Warchief | War Drums (+30% for 3 rounds), Sweeping Axe (hits two heroes) | Berserk: three attacks a round below 30% health |
+| Cinderjaw the Red | Tail Sweep (hits everyone, dodgeable), Wing Buffet (a hero loses a turn) | Fire Breath: announced, every third turn, every other below half health |
 
 After the first two bosses you choose: free the prisoner in the boss's cage
 to join your party (one prisoner of a random class, within a level of your
