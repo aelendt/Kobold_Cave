@@ -1,7 +1,10 @@
 name: Tests
 
 on:
+  # Pull requests are tested by the pull_request trigger, so pushes only
+  # need testing once they land on main; this avoids running twice per push.
   push:
+    branches: [main]
   pull_request:
 
 jobs:
