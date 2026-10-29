@@ -1,0 +1,149 @@
+// Chunky 16x16 pixel art for Kobold Cave. Each sprite is a list of rows,
+// one character per pixel; '.' is transparent and every other character
+// is a colour from PALETTE. Heroes face right, kobolds face left.
+
+export const PALETTE = {
+  k: '#1c1310', // outline
+  s: '#b95a32', S: '#7f3b23', // kobold scales and shadow
+  y: '#ffd84a', // eyes
+  h: '#eadfc4', // horn, bone, teeth
+  m: '#a9b3bd', M: '#5f6973', // metal and shadow
+  b: '#80562f', B: '#4e3420', // leather, wood
+  r: '#c0392f', R: '#7e211d', // red cloth
+  g: '#f3c34f', // gold
+  p: '#eab48a', P: '#b98058', // skin
+  c: '#5b3a22', // hair
+  u: '#4170c0', U: '#29477d', // blue robe
+  l: '#4f8a3d', L: '#305a26', // green cloak
+  f: '#ff9a2e', F: '#ffe27a', // flame, glow
+  w: '#d8d4cc', // beard
+};
+
+export const SPRITES = {
+  warrior: [
+    '................',
+    '.....kkkkk......',
+    '....kmmmmmk.....',
+    '....kmMMMmk...k.',
+    '....kmkpkpk..kmk',
+    '....kpppppk..kmk',
+    '..kkkkpppkk..kmk',
+    '.kmmmkrrrrkk.kmk',
+    'kmMgMkrrrrrpkkmk',
+    'kmgggkrRrrrppkgk',
+    'kmMgMkrrrrrkkbgbk'.slice(0, 16),
+    '.kmmmkbbbbbk.kbk',
+    '..kkkkrrrrrk..k.',
+    '.....kRk.kRk....',
+    '.....kBk.kBk....',
+    '....kkkk.kkkk...',
+  ],
+  rogue: [
+    '................',
+    '......kkkk......',
+    '.....kLLLLk.....',
+    '....kLllllLk....',
+    '....kLkpkplk....',
+    '....kLpppplk....',
+    '....kLLpplLk....',
+    '..k.kLllllLk.k..',
+    '.kmkkpLlllLpkmk.',
+    '.kmkpkLllLkpkmk.',
+    '.kmkpkbbbbkpkmk.',
+    '..kbkkLllLkkbk..',
+    '...k.kLllLk.k...',
+    '.....kLk.kLk....',
+    '.....kBk.kBk....',
+    '....kkkk.kkkk...',
+  ],
+  wizard: [
+    '........kk......',
+    '.......kuuk.....',
+    '......kuuuk.....',
+    '.....kuuuuuk..kF',
+    '....kgggggggk.kfk',
+    '.....kpkppk...kbk',
+    '.....kppppk...kbk',
+    '.....kwwwwk...kbk',
+    '....kuwwwwuk..kbk',
+    '...kuuwwwwuukpkbk',
+    '...kuUuuuuUuppkbk',
+    '...kuUuuuuUukkkbk',
+    '...kuUuuuuUuk.kbk',
+    '..kuuUuuuuUuuk.k.',
+    '..kUUUUUUUUUUk...',
+    '...kkkkkkkkkk....',
+  ].map(row => row.slice(0, 16)),
+  'Kobold Miner': [
+    '.........F......',
+    '.........f......',
+    '........kgk.....',
+    '......kkbbbkk...',
+    '.....kbbbbbbbk..',
+    '..kkkkkkkkkkkhk.',
+    '.kssssyksssskhk.',
+    'kssssssssssskk..',
+    'khkhksssssssk...',
+    '.kkkkkSsssssk.k.',
+    '....kSsssssk.kmk',
+    '...ksSsssskkkBmk',
+    '...kspSsssBBk.k.',
+    '....kkSsSsk.....',
+    '....ksk.ksk.....',
+    '...kkk..kkk.....',
+  ],
+  'Kobold Guardsman': [
+    '.kmk............',
+    '.kmk...kkkkk....',
+    '..kk..kmmmmmk...',
+    '..kBkkmmMmmmmkh.',
+    '..kBkkkkkkkkkkh.',
+    '..kBssssyksssk..',
+    '.kBsssssssssk...',
+    'kkBhkhksssssk...',
+    '.kBkkkkSsssk....',
+    '..kBkrrrrrrrk...',
+    '..kBsrRrrrRrsk..',
+    '..kBkrrrrrrrks..',
+    '...kBkSssssk.k..',
+    '....kSsk.ksk....',
+    '....ksk..ksk....',
+    '...kkk..kkk.....',
+  ],
+  'Kobold Heavy': [
+    '.....kkkkkkk....',
+    '....kmmmmmmmk...',
+    '...kmMmmmmmMmk..',
+    '..kkkkkkkkkkkhk.',
+    '.kssssyksssssk..',
+    'kssssssssssssk..',
+    'khkhkhsssssssk..',
+    '.kkkkkkkkkkkk...',
+    'kmmkmmmmmmmmkmmk',
+    'kmMkmMmmmmMmkMmk',
+    'kmmkmmmMmmmmkmmk',
+    '.kkkmMmmmmMmkkk.',
+    '...kmmmmmmmmk...',
+    '...kMmk..kmMk...',
+    '...kmmk..kmmk...',
+    '..kkkkk..kkkkk..',
+  ],
+  'Kobold Leader': [
+    '......k.k.k.....',
+    '.....kgkgkgk....',
+    '.....kgggggk....',
+    '..kkkkkkkkkkkh..',
+    '.kssssyksssskh..',
+    'kssssssssssssk..',
+    'khkhkhssssssk...',
+    '.kkkkkkSsssskRk.',
+    '...kgkrrrrrrkRRk',
+    '..kgggkrrRrrkRRk',
+    '..kkgkkrrrrrkRRk',
+    '..kBkkrrgrrrkRRk',
+    '..kBk.krrrrrkRRk',
+    '..kBk.kSsk.ksRk.',
+    '..kBk.ksk..ksk..',
+    '..kkk.kkk..kkk..',
+  ],
+};

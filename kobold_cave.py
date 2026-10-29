@@ -14,6 +14,13 @@ def debug(message):
         print(message)
 
 
+def show(scene, **details):
+    """Tell a graphical front end what is on screen. The terminal has none,
+    so this does nothing and returns False; the browser version replaces it
+    to draw the scene and returns True. Details must be plain data."""
+    return False
+
+
 def roll_on_table(table, rng=random):
     """Pick an entry from a weighted table of (weight, value) pairs.
 
@@ -169,6 +176,31 @@ def print_job_stats(job):
     print(f'       Gear: {" & ".join(job.slots)}')
 
 
+def job_view(job):
+    return {'name': job.name, 'health': job.health, 'attack': job.attack,
+            'dodge': job.dodge, 'mana': job.mana, 'special': job.special,
+            'gear': list(job.slots)}
+
+
+def hero_view(character):
+    return {'name': character.name, 'job': character.job.name,
+            'health': character.health, 'max_health': character.max_health,
+            'mana': character.mana, 'max_mana': character.max_mana}
+
+
+def monster_view(monster):
+    return {'name': monster.name, 'health': monster.health,
+            'max_health': monster.max_health, 'boss': monster.boss}
+
+
+def show_party(scene, character, monster=None):
+    # A list, so companions can join the hero later.
+    details = {'party': [hero_view(character)]}
+    if monster:
+        details['enemy'] = monster_view(monster)
+    show(scene, **details)
+
+
 def print_status(character, monster):
     print(f'Hero Current HP: {character.health}/{character.max_health}')
     if character.max_mana:
@@ -247,6 +279,10 @@ class Monster:
     attack: int
     loot_tier: str = 'common'
     boss: bool = False
+    max_health: int = 0  # filled in from health
+
+    def __post_init__(self):
+        self.max_health = self.max_health or self.health
 
 
 BESTIARY = {
@@ -346,6 +382,7 @@ def fight(character, monster, rng=random, ask=input):
 
     print('')
     print(f'You have encountered a {monster.name}. What will you do?')
+    show_party('combat', character, monster)
     while character.alive and monster.health > 0:
         action = ask(menu).strip().lower()
         print('')
@@ -358,6 +395,7 @@ def fight(character, monster, rng=random, ask=input):
                 print(f'There is no escaping the {monster.name}.')
                 continue
             if flee(character, monster, rng):
+                show_party('explore', character)
                 return False
         elif action == 'cast: fireball' and character.job.special == 'Cast: Fireball':
             if character.mana < 1:
@@ -368,6 +406,7 @@ def fight(character, monster, rng=random, ask=input):
             print('Please select a valid action.')
             continue
         print_status(character, monster)
+        show_party('combat', character, monster)
     return character.alive
 
 
@@ -383,6 +422,7 @@ def choose_job(ask=input):
 
 
 def game_over(character):
+    show_party('defeat', character)
     print('You have fallen during the encounter. GAME OVER')
     print(f'Kobolds slain: {character.cs}')
 
@@ -397,6 +437,7 @@ def explore(character, rng=random, ask=input):
             print(f'Creep Score: {character.cs}')
             search_camp(character, monster, rng, ask)
             rest(character)
+            show_party('explore', character)
             print('-----------------------------------------------------')
     if not character.alive:
         game_over(character)
@@ -408,6 +449,7 @@ def explore(character, rng=random, ask=input):
     if not fight(character, spawn('kobold_leader'), rng, ask):
         game_over(character)
         return False
+    show_party('victory', character)
     print('')
     print('The Kobold Leader collapses onto his pile of junk. The mines fall silent.')
     print(f'Well I never. {character.name} the {character.job.name} actually made it out. '
@@ -422,10 +464,12 @@ def main():
           'So to give you a fighting chance of making it through the mines '
           'I will bestow you with your choice of a special talent. '
           'You can be a mighty warrior, a sneaky rogue, or an intelligent wizard.')
-    for job in JOBS.values():
-        print_job_stats(job)
+    if not show('jobs', jobs=[job_view(job) for job in JOBS.values()]):
+        for job in JOBS.values():
+            print_job_stats(job)
 
     character = Character.create(name, choose_job())
+    show_party('explore', character)
 
     print('As you venture into the cavern the light from the entrance fades from view. '
           'In front of you is 3 branching paths.')

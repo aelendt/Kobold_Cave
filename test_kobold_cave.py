@@ -1,3 +1,4 @@
+import json
 import unittest
 from contextlib import redirect_stdout
 from dataclasses import replace
@@ -208,6 +209,26 @@ class CombatTests(unittest.TestCase):
         won = quietly(game.fight, warrior, guard, FakeRng(10, 0), answers('defend'))
         self.assertFalse(won)
         self.assertFalse(warrior.alive)
+
+
+class ShowHookTests(unittest.TestCase):
+    """The browser draws from show(); its details must survive json.dumps."""
+
+    def test_every_scene_sends_plain_data(self):
+        scenes = []
+        original = game.show
+        game.show = lambda scene, **details: scenes.append((scene, json.dumps(details))) or True
+        try:
+            wizard = hero('wizard', attack=200)
+            wizard.cs = game.BOSS_CS - 1
+            # one miner (empty camp), then the boss, each felled by a single clean hit
+            quietly(game.explore, wizard, FakeRng(5, 3, 0, 10, 3, 0), answers('attack', 'attack'))
+            game.show('jobs', jobs=[game.job_view(job) for job in game.JOBS.values()])
+        finally:
+            game.show = original
+        self.assertEqual([scene for scene, _ in scenes],
+                         ['combat', 'combat', 'explore', 'combat', 'combat', 'victory', 'jobs'])
+        self.assertIn('"max_mana": 4', scenes[0][1])
 
 
 class FlowTests(unittest.TestCase):

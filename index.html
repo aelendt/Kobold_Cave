@@ -21,6 +21,9 @@
   --copper: #d7774a;      /* loot names */
   --blood: #e0625a;       /* damage, death */
   --gold: #f4d27a;        /* victory */
+  --hp: #4f9a45;          /* hero health */
+  --hp-hi: #7cc66c;
+  --mana: #6aa2ff;
   --font-display: "IM Fell English SC", "Iowan Old Style", Georgia, serif;
   --font-body: "Courier Prime", "Courier New", ui-monospace, monospace;
   color-scheme: dark;
@@ -127,9 +130,132 @@ form { display: flex; gap: 0.5rem; }
   padding: 0.6rem 0.75rem;
 }
 #answer::placeholder { color: var(--dust-dim); }
+/* --- Picture panel (drawn by scene.js) --- */
+#scene {
+  border-bottom: 1px solid var(--seam);
+  padding-block: 0.9rem;
+}
+.sprite {
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  display: block;
+}
+.portrait {
+  position: relative;
+  width: 5rem;
+  height: 5rem;
+  flex: none;
+  padding: 0.35rem;
+  box-sizing: border-box;
+  border-radius: 4px;
+  background: radial-gradient(circle at 50% 60%, #4a3a2c 0%, #2c241e 70%);
+  box-shadow: inset 0 0 0 1px var(--seam);
+}
+.arena {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  align-items: center;
+}
+.side { display: flex; flex-direction: column; gap: 0.6rem; min-width: 0; }
+.fighter { margin: 0; display: flex; gap: 0.75rem; align-items: center; min-width: 0; }
+.enemy .fighter { flex-direction: row-reverse; text-align: right; }
+.fighter figcaption { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.25rem; }
+.who { font-weight: 700; color: var(--dust); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.what { font-size: 0.8rem; color: var(--dust-dim); }
+.badge {
+  margin-inline: 0.4rem;
+  padding: 0.05rem 0.3rem;
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rock);
+  background: var(--blood);
+  border-radius: 2px;
+  vertical-align: 0.15em;
+}
+.meter { display: flex; align-items: center; gap: 0.4rem; }
+.enemy .meter { flex-direction: row-reverse; }
+.bar {
+  flex: 1;
+  height: 0.6rem;
+  background: var(--rock);
+  box-shadow: inset 0 0 0 1px var(--seam);
+  border-radius: 1px;
+  overflow: hidden;
+}
+.bar i { display: block; height: 100%; transition: width 0.45s ease-out; }
+.bar.hp i { background: linear-gradient(var(--hp-hi), var(--hp)); }
+.enemy .bar.hp i { margin-left: auto; background: linear-gradient(#ff7a6e, var(--blood)); }
+.bar.stat i { background: var(--lantern); }
+.nums { font-size: 0.8rem; color: var(--dust-dim); font-variant-numeric: tabular-nums; min-width: 3.2rem; }
+.enemy .nums { text-align: left; }
+.pips { display: flex; gap: 0.25rem; }
+.pips i { width: 0.55rem; height: 0.55rem; background: var(--rock); box-shadow: inset 0 0 0 1px var(--mana); }
+.pips i.full { background: var(--mana); }
+.float {
+  position: absolute;
+  top: -0.2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-weight: 700;
+  color: var(--blood);
+  text-shadow: 0 1px 0 var(--rock);
+  pointer-events: none;
+}
+.float.heal { color: var(--hp-hi); }
+.fallen .portrait { filter: grayscale(1) brightness(0.55); }
+.fallen .who { text-decoration: line-through; color: var(--dust-dim); }
+.triumph .portrait { box-shadow: inset 0 0 0 1px var(--gold), 0 0 16px rgba(244, 210, 122, 0.45); }
+.quiet { margin: 0; color: var(--dust-dim); font-style: italic; text-align: right; }
+.quiet.defeat { color: var(--blood); }
+.quiet.victory { color: var(--gold); font-style: normal; font-weight: 700; }
+.jobs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.6rem; }
+button.job {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.35rem;
+  padding: 0.7rem;
+  text-align: left;
+  font-weight: 400;
+  line-height: 1.3;
+  min-width: 0;
+}
+button.job .portrait { align-self: center; width: 4.5rem; height: 4.5rem; }
+button.job .who { display: flex; gap: 0.4rem; align-items: baseline; }
+button.job:hover .who { color: var(--lantern); }
+.stat-row { display: grid; grid-template-columns: 2.2rem 1fr 1.8rem; gap: 0.35rem; align-items: center; font-size: 0.75rem; }
+.stat-row .label { color: var(--dust-dim); letter-spacing: 0.06em; }
+.stat-row .nums { min-width: 0; text-align: right; }
+@media (max-width: 34rem) {
+  .portrait { width: 3.75rem; height: 3.75rem; }
+  .fighter .who { white-space: normal; font-size: 0.9rem; line-height: 1.2; }
+  .fighter { gap: 0.5rem; }
+  .arena { gap: 0.6rem; }
+  button.job { padding: 0.5rem; }
+  button.job .portrait { width: 3.5rem; height: 3.5rem; }
+  .stat-row { grid-template-columns: 1fr; gap: 0.1rem; }
+  .stat-row .nums { display: none; }
+}
 @media (prefers-reduced-motion: no-preference) {
   #log p.new { animation: rise 0.25s ease-out; }
   @keyframes rise { from { opacity: 0.35; transform: translateY(3px); } }
+  .hit .portrait { animation: shake 0.35s ease-out; }
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-4px); background: #6b2a24; }
+    40% { transform: translateX(4px); }
+    60% { transform: translateX(-2px); }
+    80% { transform: translateX(2px); }
+  }
+  .float { animation: float-up 1.1s ease-out forwards; }
+  @keyframes float-up {
+    from { opacity: 1; transform: translate(-50%, 0.6rem); }
+    to { opacity: 0; transform: translate(-50%, -1rem); }
+  }
+  .fallen .portrait { transition: filter 0.6s; }
 }
 </style>
 </head>
@@ -139,6 +265,7 @@ form { display: flex; gap: 0.5rem; }
     <h1>Kobold Cave</h1>
     <span class="depth" id="status">Lighting the lantern…</span>
   </header>
+  <section id="scene" aria-label="Battle" hidden></section>
   <div id="log" aria-live="polite">
     <p class="system">Loading Python in your browser. This takes a few seconds the first time.</p>
   </div>
@@ -152,6 +279,8 @@ form { display: flex; gap: 0.5rem; }
 </div>
 
 <script type="module">
+import { showScene, clearScene } from './scene.js';
+
 // Pyodide is tried from a local copy first (see README), then the CDN.
 const PYODIDE_SOURCES = ['./pyodide/', 'https://cdn.jsdelivr.net/npm/pyodide@314.0.7/'];
 
@@ -172,11 +301,13 @@ function classify(line) {
   if (/actually made it out|collapses onto his pile/.test(line)) return 'victory';
   if (/^You have encountered/.test(line)) return 'encounter';
   if (/You are struck|CRITICAL FAIL|blow to the head/.test(line)) return 'hurt';
-  if (/^\s*(Hero Current HP|Enemy HP|Creep Score):|^\s*Mana: \d+\/\d+/.test(line)) return 'stat';
+  if (/^\s*(Hero Current HP|Enemy HP):|^\s*Mana: \d+\/\d+/.test(line)) return 'panel';  // drawn in the panel instead
+  if (/^Creep Score:/.test(line)) return 'stat';
   return '';
 }
 
 function addLine(text, cls = classify(text)) {
+  if (cls === 'panel' && !document.getElementById('scene').hidden) return;
   const p = document.createElement('p');
   p.className = `${cls} new`.trim();
   // Item names are printed in [brackets]; give them the loot colour.
@@ -201,6 +332,11 @@ function writeStdout(bytes) {
 // Called from Python's input(). Shows the prompt, turns any [A / B / C]
 // menu into buttons, and resolves with what the player picks or types.
 let resolveAnswer = null;
+// Called from kobold_cave.show() to update the picture panel.
+window.drawScene = function (scene, json) {
+  showScene(scene, JSON.parse(json), { pick: submit });
+};
+
 window.askPlayer = function (prompt) {
   const menu = prompt.match(/\[([^\]]+)\]\s*:?\s*$/);
   const question = (menu ? prompt.slice(0, menu.index) : prompt).trim();
@@ -299,7 +435,14 @@ def web_input(prompt=''):
 
 builtins.input = web_input
 sys.path.insert(0, '/home/pyodide')
+import json
 import kobold_cave
+
+def web_show(scene, **details):
+    js.drawScene(scene, json.dumps(details))
+    return True
+
+kobold_cave.show = web_show
 `);
 
   while (true) {
@@ -317,6 +460,7 @@ import kobold_cave
       again.addEventListener('click', () => {
         resolveAnswer = null;
         log.replaceChildren();
+        clearScene();
         statusLabel.textContent = 'At the entrance';
         resolve();
       });

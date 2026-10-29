@@ -32,7 +32,10 @@ To see every dice roll, set `DEBUG = True` at the top of `kobold_cave.py`.
 
 `index.html` runs the same `kobold_cave.py` in Chrome using
 [Pyodide](https://pyodide.org) (Python compiled to WebAssembly). Menus become
-buttons, and number keys pick options. Serve the folder, then open
+buttons, number keys pick options, and a picture panel shows pixel-art
+portraits, health bars and mana for each fight. The sprites live in
+`sprites.js` as 16x16 grids of letters, one per pixel, so you can edit them in
+any text editor. Serve the folder, then open
 http://localhost:8000 in Chrome 137 or newer:
 
 ```bash
