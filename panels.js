@@ -181,7 +181,8 @@ export function drawInfoPanel(details) {
   } else {
     bag.append(element('li', 'empty', 'The bag is empty.'));
   }
-  blocks.push(section('Supplies', definitions([['Bandages', details.bandages],
+  blocks.push(section('Supplies', definitions([['Gold', details.gold], ['Scrap', details.scrap],
+                                               ['Bandages', details.bandages],
                                                ['Bag', `${details.bag.length} / 6`]]), bag));
   infoPanel.replaceChildren(...blocks);
 }

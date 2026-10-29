@@ -919,6 +919,120 @@ class RewardTests(unittest.TestCase):
         self.assertEqual(len(party.members), 3)
 
 
+class ForgeTests(unittest.TestCase):
+    def test_reforging_adds_stats_and_a_plus(self):
+        blade = game.reforged(game.ITEMS['mithril_blade'])
+        self.assertEqual((blade.name, blade.attack, blade.forged), ('Mithril Blade +1', 19, 1))
+        blade = game.reforged(blade)
+        self.assertEqual((blade.name, blade.attack), ('Mithril Blade +2', 23))
+
+    def test_salvage_turns_bag_items_into_scrap(self):
+        party = party_of(hero())
+        party.bag = [game.ITEMS['fine_sword'], game.ITEMS['mithril_buckler'],
+                     game.ITEMS['lucky_coin']]
+        quietly(game.visit_forge, party, answers('salvage', 'fine sword', 'salvage', 'all',
+                                                 'leave'))
+        self.assertEqual((party.bag, party.scrap), ([], 1 + 3 + 2))
+
+    def test_reforge_spends_scrap_on_equipped_gear(self):
+        warrior = hero()
+        game.equip(warrior, 'Weapon', game.ITEMS['firebrand'])
+        party = party_of(warrior)
+        party.scrap = 3  # the first reforge costs 1 scrap, the second 2
+        quietly(game.visit_forge, party, answers('reforge', "test's firebrand sword",
+                                                 'reforge', "test's firebrand sword +1", 'leave'))
+        self.assertEqual(warrior.equipment['Weapon'].name, 'Firebrand Sword +2')
+        self.assertEqual((warrior.attack, party.scrap), (15 + 10 + 8, 0))
+
+    def test_reforging_needs_enough_scrap_and_stops_at_plus_three(self):
+        warrior = hero()
+        maxed = game.ITEMS['fine_shield']
+        for _ in range(game.FORGE_LIMIT):
+            maxed = game.reforged(maxed)
+        game.equip(warrior, 'Shield', maxed)
+        game.equip(warrior, 'Weapon', game.ITEMS['fine_sword'])
+        party = party_of(warrior)
+        party.scrap = 0
+        prompts = []
+        def ask(prompt):
+            prompts.append(prompt)
+            return ['reforge', "test's fine sword", 'leave'][len(prompts) - 1]
+        _, out = captured(game.visit_forge, party, ask)
+        self.assertIn('That needs 1 scrap', out)
+        self.assertNotIn('Fine Shield', prompts[1])  # already +3
+
+
+class TraderTests(unittest.TestCase):
+    def test_trader_sells_bandages_vials_a_trinket_and_a_tome(self):
+        rogue = hero('rogue', skills=['Twin Strike'])
+        labels = [label for label, _, _ in game.trader_stock(party_of(rogue), FakeRng(0, 0))]
+        self.assertEqual(labels[:2], ['Bandage', "Troll's Blood Vial"])
+        self.assertEqual(len(labels), 4)
+        self.assertTrue(labels[3].startswith('Tome of '))
+
+    def test_buying_spends_gold(self):
+        warrior = hero()
+        party = party_of(warrior)
+        party.gold = 36
+        quietly(game.visit_trader, party, FakeRng(0, 0),
+                answers('bandage', "troll's blood vial", 'test', 'bandage', 'leave'))
+        self.assertEqual(party.bandages, game.START_BANDAGES + 2)
+        self.assertEqual(warrior.trinket, game.ITEMS['trolls_blood'])
+        self.assertEqual(party.gold, 36 - 8 - 20 - 8)
+
+    def test_you_cannot_buy_what_you_cannot_afford(self):
+        party = party_of(hero())
+        party.gold = 5
+        _, out = captured(game.visit_trader, party, FakeRng(0, 0), answers('bandage', 'leave'))
+        self.assertIn('That costs 8 gold', out)
+        self.assertEqual(party.bandages, game.START_BANDAGES)
+
+    def test_a_tome_teaches_a_skill(self):
+        warrior = hero(skills=['Cleave'])
+        party = party_of(warrior)
+        party.gold = 45
+        stock = game.trader_stock(party, FakeRng(0, 0))
+        tome = stock[-1][0]
+        quietly(game.visit_trader, party, FakeRng(0, 0), answers(tome.lower(), 'leave'))
+        self.assertEqual(len(warrior.actions), 2)
+        self.assertEqual(party.gold, 0)
+
+    def test_selling_bag_items(self):
+        party = party_of(hero())
+        party.bag = [game.ITEMS['mithril_blade']]
+        quietly(game.visit_trader, party, FakeRng(0, 0), answers('sell', 'mithril blade', 'leave'))
+        self.assertEqual((party.bag, party.gold), ([], 3 * 6))
+
+
+class ForkTests(unittest.TestCase):
+    def test_the_fork_leads_where_you_choose(self):
+        party = party_of(hero())
+        stage = game.STAGES[0]
+        _, out = captured(game.fork, party, stage, 3, FakeRng(), answers('forge', 'leave'))
+        self.assertIn('Someone left this forge burning', out)
+        _, out = captured(game.fork, party, stage, 3, FakeRng(0, 0), answers('trader', 'leave'))
+        self.assertIn('Friends! Customers!', out)
+
+    def test_the_dark_tunnel_can_hide_a_cache(self):
+        party = party_of(hero())
+        # cache roll, then common loot: a trinket (rolls 6-7), the first one
+        quietly(game.dark_tunnel, party, game.STAGES[0], 3, FakeRng(1, 6, 0), answers('bag'))
+        self.assertEqual(party.gold, 20)
+        self.assertEqual(len(party.bag), 1)
+
+    def test_the_dark_tunnel_can_be_an_ambush(self):
+        party = party_of(hero(attack=1000))
+        # ambush roll, encounter roll on the stage's deepest table (a miner), its free
+        # strike (no ability; damage, dodge), one blow; then XP, gold and the bandage
+        # roll, but no camp to search; and no bandage used on the wound
+        won_out = captured(game.dark_tunnel, party, game.STAGES[0], 3,
+                           FakeRng(2, 5, 2, 0, -2, 0, 2), answers('attack', 'no'))[1]
+        self.assertIn('they strike first', won_out)
+        self.assertIn('You are struck', won_out)
+        self.assertNotIn('search the kobolds camp', won_out)
+        self.assertEqual(party.cs, 1)
+
+
 class FlowTests(unittest.TestCase):
     def setUp(self):
         self.stages, self.bestiary = game.STAGES, game.BESTIARY
@@ -1013,6 +1127,15 @@ class ShowHookTests(unittest.TestCase):
         self.assertEqual([stage['boss'] for stage in details['stages']],
                          ['Kobold Leader', 'Kobold Warchief', 'Cinderjaw the Red'])
         self.assertEqual(details['bag'][0]['name'], 'Fine Sword')
+
+    def test_a_win_ends_with_a_spoils_card(self):
+        party = party_of(hero())
+        quietly(game.after_victory, party, game.spawn('kobold_guard'), FakeRng(5, 2), answers())
+        scene, details = self.scenes[-1]
+        self.assertEqual(scene, 'spoils')
+        spoils = json.loads(details)['spoils']
+        self.assertEqual((spoils['xp'], spoils['gold'], spoils['found']), (15, 6, 'Nothing of worth'))
+        self.assertEqual(party.gold, 6)
 
     def test_class_cards_are_plain_data(self):
         game.show('jobs', jobs=[game.job_view(job) for job in game.JOBS.values()])

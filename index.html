@@ -219,6 +219,15 @@ h1 {
   gap: 0.6rem;
 }
 #question { margin: 0; color: var(--lantern); font-weight: 700; }
+.venue { display: flex; gap: 1rem; align-items: flex-start; }
+.venue .portrait { width: 5rem; height: 5rem; }
+.venue-notes { display: flex; flex-direction: column; gap: 0.3rem; min-width: 0; }
+.venue-heading { letter-spacing: 0.08em; text-transform: uppercase; margin-top: 0.3rem; }
+ul.spoils { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.15rem; font-size: 0.85rem; }
+ul.spoils .gain { color: var(--gold); font-weight: 700; }
+ul.spoils .loot { color: var(--copper); }
+.gold, ul.spoils .gold { color: var(--gold); }
+#log.revealing { cursor: pointer; }
 #question:empty { display: none; }
 #choices { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 #choices:empty { display: none; }
@@ -493,6 +502,46 @@ function addLine(text, cls = classify(text)) {
   log.scrollTop = 0;
 }
 
+// Pacing: lines, picture updates and the next question all go through one
+// queue, so text arrives a line at a time and the picture keeps in step.
+// Clicking the log or pressing a key shows the rest at once.
+const LINE_DELAY = 170;  // milliseconds between lines
+const steps = [];
+let revealing = false;
+let skipping = false;  // stays on until the next question, so the whole turn shows
+let lastLineAt = 0;
+
+function enqueue(run, paced = false) {
+  steps.push({ run, paced });
+  if (!revealing) reveal();
+}
+
+async function reveal() {
+  revealing = true;
+  log.classList.add('revealing');
+  while (steps.length) {
+    // Python's lines trickle in one by one, so space them out by the time
+    // since the last line was shown, not by whether more are waiting.
+    const wait = lastLineAt + LINE_DELAY - performance.now();
+    if (steps[0].paced && !skipping && wait > 0) {
+      await new Promise(resolve => setTimeout(resolve, wait));
+    }
+    const step = steps.shift();
+    step.run();
+    if (step.paced) lastLineAt = performance.now();
+  }
+  revealing = false;
+  log.classList.remove('revealing');
+}
+
+function skipAhead() {
+  if (revealing) skipping = true;
+}
+log.addEventListener('click', skipAhead);
+
+// Resolves once everything queued so far has been shown.
+const settled = () => new Promise(resolve => enqueue(resolve));
+
 // Python's print() arrives here byte by byte; split it into lines.
 let pending = '';
 const decoder = new TextDecoder();
@@ -500,7 +549,7 @@ function writeStdout(bytes) {
   pending += decoder.decode(bytes, { stream: true });
   const lines = pending.split('\n');
   pending = lines.pop();
-  lines.forEach(line => addLine(line));
+  lines.forEach(line => enqueue(() => addLine(line), line.trim() !== ''));
   return bytes.length;
 }
 
@@ -510,15 +559,22 @@ let resolveAnswer = null;
 // Called from kobold_cave.show() to update the picture panel.
 window.drawScene = function (scene, json) {
   const details = JSON.parse(json);
-  showScene(scene, details, { pick: submit });
-  if (details.party) {
-    drawPartyPanel(details);
-    drawInfoPanel(details);
-  }
-  if (details.stage) statusLabel.textContent = `${details.stage} · Slain: ${details.cs}`;
+  enqueue(() => {
+    showScene(scene, details, { pick: submit });
+    if (details.party) {
+      drawPartyPanel(details);
+      drawInfoPanel(details);
+    }
+    if (details.stage) statusLabel.textContent = `${details.stage} · Slain: ${details.cs}`;
+  });
 };
 
 window.askPlayer = function (prompt) {
+  return new Promise(resolve => enqueue(() => showQuestion(prompt, resolve)));
+};
+
+function showQuestion(prompt, resolve) {
+  skipping = false;
   const menu = prompt.match(/\[([^\]]+)\]\s*:?\s*$/);
   question.textContent = (menu ? prompt.slice(0, menu.index) : prompt).trim();
 
@@ -535,8 +591,8 @@ window.askPlayer = function (prompt) {
   answer.disabled = send.disabled = false;
   answer.placeholder = menu ? 'Pick an option, or type it' : 'Type your answer and press Enter';
   if (!matchMedia('(pointer: coarse)').matches || !menu) answer.focus();
-  return new Promise(resolve => { resolveAnswer = resolve; });
-};
+  resolveAnswer = resolve;
+}
 
 function submit(text) {
   if (!resolveAnswer) return;
@@ -559,6 +615,10 @@ form.addEventListener('submit', event => {
 
 // Number keys pick a menu option while the text box is empty.
 document.addEventListener('keydown', event => {
+  if (revealing && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    skipAhead();
+    return;
+  }
   if (!resolveAnswer || answer.value || event.ctrlKey || event.metaKey || event.altKey) return;
   const index = Number(event.key) - 1;
   const button = choices.children[index];
@@ -636,6 +696,7 @@ kobold_cave.show = web_show
     } catch (error) {
       addLine(String(error.message || error), 'death');
     }
+    await settled();
     addLine('-'.repeat(20));
     await new Promise(resolve => {
       choices.replaceChildren();

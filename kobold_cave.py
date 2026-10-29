@@ -11,6 +11,7 @@ MEND_POWER = 0.5  # Mend heals this fraction of the caster's spell power
 START_BANDAGES = 2
 MAX_PARTY = 3
 BAG_SIZE = 6  # spare items the party can carry; the oldest falls out when it's full
+FORGE_LIMIT = 3  # how many times one item can be reforged
 LEVEL_XP = (0, 50, 120, 220, 350, 520, 720, 950)  # total XP needed to reach each level
 SKILL_LEVELS = (2, 4)  # level-ups that also teach a basic skill (1 of 2 offered)
 
@@ -56,6 +57,7 @@ class Item:
     tier: int = 0  # 1 Fine .. 4 Dragonbone; 0 for things that never drop at random
     effect: str = ''  # what a trinket does, see TRINKET_EFFECTS
     jobs: tuple = ()  # classes that can find it; empty means everyone
+    forged: int = 0  # times reforged at a forge, shown as "+1" and so on
 
     def describe(self):
         bonuses = [(self.attack, 'attack'), (self.max_health, 'max HP'),
@@ -328,6 +330,8 @@ class Party:
     depth: int = 0  # index of the current stage in STAGES, for its loot
     kills: int = 0  # kobolds slain in the current stage
     bag: list = field(default_factory=list)  # spare items, handed out between fights
+    gold: int = 0  # spent at traders
+    scrap: int = 0  # salvaged from old gear, spent at forges
     bag_changed: bool = False  # something went in since the bag was last offered
     smoke: bool = False  # Smoke Bomb: every strike misses this round
     shielded: bool = False  # Arcane Shield: damage is halved this round
@@ -341,17 +345,22 @@ class Party:
         return bool(self.living)
 
 
-def show_party(scene, party, monster=None, active=None):
+def show_party(scene, party, monster=None, active=None, **extra):
+    show(scene, **party_details(party, monster, active), **extra)
+
+
+def party_details(party, monster=None, active=None):
     details = {'party': [hero_view(member) for member in party.members],
                'bandages': party.bandages, 'cs': party.cs, 'stage': party.stage,
                'bag': [{'name': item.name, 'describe': item.describe()} for item in party.bag],
                'active': party.members.index(active) if active else None,
                'depth': party.depth, 'kills': party.kills,
                'stages': [{'name': stage.name, 'fights': stage.fights,
-                           'boss': BESTIARY[stage.boss].name} for stage in STAGES]}
+                           'boss': BESTIARY[stage.boss].name} for stage in STAGES],
+               'gold': party.gold, 'scrap': party.scrap}
     if monster:
         details['enemy'] = monster_view(monster)
-    show(scene, **details)
+    return details
 
 
 def print_status(party, monster):
@@ -429,10 +438,10 @@ def search_camp(party, monster, rng=random, ask=input):
     if item is None:
         print('You search the kobolds camp but find nothing of worth. '
               'You take your frustration out on the kobolds corpse.')
-        return
+        return 'Nothing of worth'
     a = 'an' if item.name[0] in 'AEIOU' else 'a'
     print(f'You search the kobolds camp and find {a} [{item.name}] ({item.describe()}).')
-    hand_out(party, item, ask)
+    return f'{item.name}: {hand_out(party, item, ask)}'
 
 
 def stow(party, item):
@@ -455,7 +464,8 @@ def wearing(member, item):
 
 
 def hand_out(party, item, ask=input):
-    """Let the player choose who takes an item, or put it in the bag."""
+    """Let the player choose who takes an item, or put it in the bag.
+    Returns where it went, for the spoils card."""
     takers = [member for member in party.living if fits(member, item)]
     for member in takers:
         print(f'  {member.name} the {member.job.name} would replace {wearing(member, item)}')
@@ -465,13 +475,13 @@ def hand_out(party, item, ask=input):
         answer = ask(f'Who takes the [{item.name}]? [{" / ".join(labels)}] ').strip().lower()
         if answer == 'leave':
             print(f'You leave the [{item.name}] behind.')
-            return
+            return 'left behind'
         if answer == 'bag':
             stow(party, item)
-            return
+            return 'into the bag'
         if answer in options:
             receive(party, options[answer], item, ask)
-            return
+            return f'to {options[answer].name}'
         print('Please select a valid option.')
 
 
@@ -515,6 +525,7 @@ def find_bandages(party, monster, rng=random):
         party.bandages += found
         print(f'You find {"a roll" if found == 1 else f"{found} rolls"} of bandages. '
               f'Bandages: {party.bandages}')
+    return found
 
 
 def heal(member, amount):
@@ -524,6 +535,8 @@ def heal(member, amount):
 
 
 def rest(party):
+    """Returns how much each hero healed, for the spoils card."""
+    healing = {}
     for member in party.living:
         healed = heal(member, round(member.max_health * REST_HEAL))
         recharged = member.mana < member.max_mana
@@ -532,6 +545,8 @@ def rest(party):
                         + (' Your magic returns to you.' if recharged else ''),
                 f'{{name}} catches their breath and recovers {healed} HP.'
                 + (' Their magic returns.' if recharged else ''))
+        healing[member.name] = healed
+    return healing
 
 
 def offer_bandages(party, ask=input):
@@ -575,6 +590,7 @@ class Monster:
     breath: int = 0  # Fire Breath damage
     called: str = 'the kobold'  # how the narration refers to it mid-fight
     xp: int = 0  # experience for the party when slain
+    gold: int = 0  # gold the party picks off the body
     abilities: tuple = ()  # basic abilities, see MONSTER_ABILITIES
     signature: str = ''  # a boss's signature ability
     stunned: int = 0  # turns it will lose
@@ -596,21 +612,21 @@ class Monster:
 
 
 BESTIARY = {
-    'kobold_miner': Monster('Kobold Miner', health=42, attack=14, xp=10,
+    'kobold_miner': Monster('Kobold Miner', health=42, attack=14, xp=10, gold=4,
                             abilities=('Rock Toss',)),
-    'kobold_guard': Monster('Kobold Guardsman', health=67, attack=23, xp=15,
+    'kobold_guard': Monster('Kobold Guardsman', health=67, attack=23, xp=15, gold=6,
                             abilities=('Shield Up',)),
-    'kobold_heavy': Monster('Kobold Heavy', health=142, attack=40, xp=25, loot_tier='rare',
-                            abilities=('Crushing Blow',)),
-    'kobold_shaman': Monster('Kobold Shaman', health=110, attack=39, xp=25,
+    'kobold_heavy': Monster('Kobold Heavy', health=142, attack=40, xp=25, gold=12,
+                            loot_tier='rare', abilities=('Crushing Blow',)),
+    'kobold_shaman': Monster('Kobold Shaman', health=110, attack=39, xp=25, gold=10,
                              abilities=('Hex',)),
     'kobold_dragonguard': Monster('Kobold Dragonguard', health=190, attack=46, xp=35,
-                                  loot_tier='rare', abilities=('Fire Spear',)),
-    'kobold_leader': Monster('Kobold Leader', health=304, attack=44, xp=60, boss=True,
-                             called='the Leader', abilities=('Dirty Trick', 'Rally'),
-                             signature='Junk Avalanche'),
-    'kobold_warchief': Monster('Kobold Warchief', health=683, attack=46, xp=100, boss=True,
-                               attacks=2, called='the Warchief',
+                                  gold=15, loot_tier='rare', abilities=('Fire Spear',)),
+    'kobold_leader': Monster('Kobold Leader', health=304, attack=44, xp=60, gold=40,
+                             boss=True, called='the Leader',
+                             abilities=('Dirty Trick', 'Rally'), signature='Junk Avalanche'),
+    'kobold_warchief': Monster('Kobold Warchief', health=683, attack=46, xp=100, gold=70,
+                               boss=True, attacks=2, called='the Warchief',
                                abilities=('War Drums', 'Sweeping Axe'), signature='Berserk'),
     'red_dragon': Monster('Cinderjaw the Red', health=1288, attack=54, boss=True, attacks=2,
                           breath=42, called='Cinderjaw',
@@ -629,6 +645,7 @@ def spawn(monster_key):
 class Stage:
     name: str
     fights: int  # kobolds to slay before the boss
+    forks: tuple  # after this many kills the tunnel splits (forge, trader, dark tunnel)
     encounters: tuple  # (kills so far below this, table) pairs, checked in order
     boss: str
     loot: dict  # 'common' / 'rare' -> table of None (empty), 'trinket' or a gear tier
@@ -645,7 +662,7 @@ LOWER_WARREN_ENCOUNTERS = ((2, 'kobold_guard'), (5, 'kobold_heavy'), (3, 'kobold
 HOARD_ENCOUNTERS = ((3, 'kobold_heavy'), (3, 'kobold_shaman'), (4, 'kobold_dragonguard'))
 
 STAGES = (
-    Stage('Upper Mines', fights=8,
+    Stage('Upper Mines', fights=8, forks=(3, 6),
           encounters=((3, SHALLOW_ENCOUNTERS), (5, MIDDLE_ENCOUNTERS), (99, DEEP_ENCOUNTERS)),
           boss='kobold_leader',
           loot={'common': ((5, None), (2, 'trinket'), (9, 1), (4, 2)),
@@ -654,7 +671,7 @@ STAGES = (
           boss_intro='The tunnel opens into a torch-lit chamber. Atop a throne of stolen junk '
                      'sits the Kobold Leader, who does not look happy to see you.',
           boss_outro='The Kobold Leader collapses onto his pile of junk.'),
-    Stage('Deep Warrens', fights=8,
+    Stage('Deep Warrens', fights=8, forks=(3, 6),
           encounters=((4, WARREN_ENCOUNTERS), (99, LOWER_WARREN_ENCOUNTERS)),
           boss='kobold_warchief',
           loot={'common': ((5, None), (3, 'trinket'), (8, 2), (4, 3)),
@@ -665,7 +682,7 @@ STAGES = (
                      'dragging an axe bigger than he is.',
           boss_outro='The Warchief topples. Somewhere far below, something enormous rolls '
                      'over in its sleep.'),
-    Stage('The Hoard', fights=6,
+    Stage('The Hoard', fights=6, forks=(3,),
           encounters=((99, HOARD_ENCOUNTERS),),
           boss='red_dragon',
           loot={'common': ((5, None), (3, 'trinket'), (8, 3), (4, 4)),
@@ -1503,13 +1520,17 @@ def level_up(member, rng=random, ask=input):
 
 
 def award_xp(party, monster, rng=random, ask=input):
+    """Returns the names of heroes who levelled up, for the spoils card."""
     if not monster.xp:
-        return
+        return []
     print(f'The party earns {monster.xp} XP.')
+    levelled = []
     for member in party.living:
         member.xp += monster.xp
         while member.level < len(LEVEL_XP) and member.xp >= LEVEL_XP[member.level]:
             level_up(member, rng, ask)
+            levelled.append(f'{member.name} reached level {member.level}')
+    return levelled
 
 
 def prisoner(job_key, stage_index, level=1, rng=random):
@@ -1609,18 +1630,9 @@ def clear_stage(party, stage, rng=random, ask=input):
         if fight(party, monster, rng, ask):
             kills += 1
             party.kills = kills
-            party.cs += 1
-            print('Your enemy has fallen. You may move on.')
-            print(f'Creep Score: {party.cs}')
-            award_xp(party, monster, rng, ask)
-            search_camp(party, monster, rng, ask)
-            find_bandages(party, monster, rng)
-            rest(party)
-            show_party('explore', party)
-            offer_bandages(party, ask)
-            if party.bag_changed:
-                open_bag(party, ask)
-            print('-----------------------------------------------------')
+            after_victory(party, monster, rng, ask)
+            if party.alive and kills in stage.forks:
+                fork(party, stage, kills, rng, ask)
     if not party.alive:
         return False
 
@@ -1633,9 +1645,243 @@ def clear_stage(party, stage, rng=random, ask=input):
     print('')
     print(stage.boss_outro)
     award_xp(party, boss, rng, ask)
+    collect_gold(party, boss)
     claim_boss_drop(party, boss, ask)
     find_bandages(party, boss, rng)
     return True
+
+
+def collect_gold(party, monster):
+    if monster.gold:
+        party.gold += monster.gold
+        print(f'You pick {monster.gold} gold off the body. Gold: {party.gold}')
+    return monster.gold
+
+
+def after_victory(party, monster, rng=random, ask=input, camp=True):
+    """Everything after a kobold falls: rewards, rest, then a spoils card
+    so the browser can sum it all up at a glance. An ambush leaves no camp
+    to search."""
+    party.cs += 1
+    print('Your enemy has fallen. You may move on.')
+    print(f'Creep Score: {party.cs}')
+    levelled = award_xp(party, monster, rng, ask)
+    gold = collect_gold(party, monster)
+    found = search_camp(party, monster, rng, ask) if camp else 'No camp to search'
+    bandages = find_bandages(party, monster, rng)
+    healing = rest(party)
+    show_party('spoils', party, spoils={
+        'monster': monster.name, 'xp': monster.xp, 'levelled': levelled, 'gold': gold,
+        'found': found, 'bandages': bandages, 'healing': healing})
+    offer_bandages(party, ask)
+    if party.bag_changed:
+        open_bag(party, ask)
+    print('-----------------------------------------------------')
+
+
+# --- Forks: the forge, the trader and the dark tunnel ----------------------
+
+REFORGE = {  # what each reforge adds, by kind of item
+    'sword': {'attack': 4},
+    'dagger': {'attack': 3, 'max_health': 12},
+    'shield': {'max_health': 20},
+    'staff': {'spell_power': 8},
+}
+
+
+def scrap_value(item):
+    if item.kind == 'trinket':
+        return 2
+    return item.tier or 4  # boss uniques count as top tier
+
+
+def sell_value(item):
+    return scrap_value(item) * 6
+
+
+def reforged(item):
+    """The same item, one reforge better: "Mithril Blade" becomes "Mithril Blade +1"."""
+    base = item.name.rsplit(' +', 1)[0] if item.forged else item.name
+    gains = {stat: getattr(item, stat) + amount for stat, amount in REFORGE[item.kind].items()}
+    return replace(item, name=f'{base} +{item.forged + 1}', forged=item.forged + 1, **gains)
+
+
+def choose(ask, question, labels):
+    """Ask until the answer is one of the labels; returns the label as written."""
+    options = {label.lower(): label for label in labels}
+    while True:
+        answer = ask(f'{question} [{" / ".join(labels)}] ').strip().lower()
+        if answer in options:
+            return options[answer]
+        print('Please select a valid option.')
+
+
+def visit_forge(party, ask=input):
+    print('Someone left this forge burning. Old gear can be broken down for scrap, '
+          'and scrap can make good gear better.')
+    while True:
+        forgeable = {}
+        for member in party.living:
+            for slot, item in member.equipment.items():
+                if item and item.kind in REFORGE and item.forged < FORGE_LIMIT:
+                    forgeable[f"{member.name}'s {item.name}"] = (member, slot, item)
+        show_party('forge', party, forge={
+            'scrap': party.scrap,
+            'salvage': [{'name': item.name, 'scrap': scrap_value(item)} for item in party.bag],
+            'reforge': [{'label': label, 'cost': item.forged + 1,
+                         'into': reforged(item).describe()}
+                        for label, (_, _, item) in forgeable.items()]})
+        print(f'Scrap: {party.scrap}')
+        action = choose(ask, 'What will you do at the forge?', ['Salvage', 'Reforge', 'Leave'])
+        if action == 'Leave':
+            return
+        if action == 'Salvage':
+            if not party.bag:
+                print('The bag is empty. Nothing to break down.')
+                continue
+            for item in party.bag:
+                print(f'  [{item.name}] is worth {scrap_value(item)} scrap')
+            pick_name = choose(ask, 'Salvage what?',
+                               [item.name for item in party.bag] + ['All', 'Back'])
+            if pick_name == 'Back':
+                continue
+            chosen = party.bag[:] if pick_name == 'All' else \
+                [next(item for item in party.bag if item.name == pick_name)]
+            for item in chosen:
+                party.bag.remove(item)
+                party.scrap += scrap_value(item)
+                print(f'You break down the [{item.name}] for {scrap_value(item)} scrap.')
+            continue
+        if not forgeable:
+            print('Nobody is carrying anything the forge can improve.')
+            continue
+        for label, (_, _, item) in forgeable.items():
+            print(f'  {label} -> +{item.forged + 1} ({reforged(item).describe()}), '
+                  f'{item.forged + 1} scrap')
+        label = choose(ask, 'Reforge what?', list(forgeable) + ['Back'])
+        if label == 'Back':
+            continue
+        member, slot, item = forgeable[label]
+        cost = item.forged + 1
+        if party.scrap < cost:
+            print(f'That needs {cost} scrap, and you have {party.scrap}.')
+            continue
+        party.scrap -= cost
+        better = reforged(item)
+        equip(member, slot, better)
+        print(f'Sparks fly. The [{item.name}] is now the [{better.name}] ({better.describe()}).')
+
+
+def trader_stock(party, rng):
+    """What the trader has today: (label, price, what it is) triples."""
+    stock = [('Bandage', 8, 'bandage'), ("Troll's Blood Vial", 20, ITEMS['trolls_blood'])]
+    trinkets = [item for item in TRINKETS if item.effect != 'vial'
+                and any(fits(member, item) for member in party.living)]
+    if trinkets:
+        trinket = pick(trinkets, rng)
+        stock.append((trinket.name, 30, trinket))
+    students = [member for member in party.living
+                if any(name not in member.actions for name in member.job.skills)]
+    if students:
+        student = pick(students, rng)
+        skill = pick([name for name in student.job.skills if name not in student.actions], rng)
+        stock.append((f'Tome of {skill}', 45, (student, skill)))
+    return stock
+
+
+def visit_trader(party, rng=random, ask=input):
+    print('A kobold with an enormous pack waves you over. "Friends! Customers! Same thing!"')
+    stock = trader_stock(party, rng)
+    while True:
+        for label, price, wares in stock:
+            note = f' (teaches {wares[0].name} {wares[1]})' if isinstance(wares, tuple) else ''
+            print(f'  {label}: {price} gold{note}')
+        show_party('trader', party, trader={
+            'gold': party.gold,
+            'stock': [{'label': label, 'price': price,
+                       'note': (f'Teaches {wares[0].name}: {ACTIONS[wares[1]].description}'
+                                if isinstance(wares, tuple) else
+                                'One more roll of bandages' if wares == 'bandage' else
+                                wares.describe())}
+                      for label, price, wares in stock],
+            'sell': [{'name': item.name, 'gold': sell_value(item)} for item in party.bag]})
+        print(f'Gold: {party.gold}')
+        labels = [label for label, _, _ in stock] + ['Sell', 'Leave']
+        choice = choose(ask, 'What will you buy?', labels)
+        if choice == 'Leave':
+            print('"Come back when you\'re richer. Or deader. I buy from both."')
+            return
+        if choice == 'Sell':
+            if not party.bag:
+                print('The bag is empty. The trader looks hurt.')
+                continue
+            for item in party.bag:
+                print(f'  [{item.name}] sells for {sell_value(item)} gold')
+            name = choose(ask, 'Sell what?', [item.name for item in party.bag] + ['Back'])
+            if name == 'Back':
+                continue
+            item = next(item for item in party.bag if item.name == name)
+            party.bag.remove(item)
+            party.gold += sell_value(item)
+            print(f'You sell the [{item.name}] for {sell_value(item)} gold.')
+            continue
+        entry = next(entry for entry in stock if entry[0] == choice)
+        label, price, wares = entry
+        if party.gold < price:
+            print(f'That costs {price} gold, and you have {party.gold}.')
+            continue
+        party.gold -= price
+        if wares == 'bandage':
+            party.bandages += 1
+            print(f'You buy a roll of bandages. Bandages: {party.bandages}')
+            continue
+        stock.remove(entry)
+        if isinstance(wares, tuple):
+            student, skill = wares
+            student.actions.append(skill)
+            narrate(student, f'You study the tome and learn {skill}.',
+                    f'{{name}} studies the tome and learns {skill}.')
+        else:
+            print(f'You buy the [{wares.name}].')
+            hand_out(party, wares, ask)
+
+
+def dark_tunnel(party, stage, kills, rng=random, ask=input):
+    """Half the time a hidden cache, half the time an ambush: the kobold
+    strikes first, but beating it pays out like any other fight."""
+    if rng.randint(1, 2) == 1:
+        gold = 20 + 15 * party.depth
+        party.gold += gold
+        print(f'At the end of the tunnel is a forgotten cache: {gold} gold. Gold: {party.gold}')
+        item = roll_loot(party.living, stage.loot['common'], rng)
+        if item:
+            print(f'Under the coins lies a [{item.name}] ({item.describe()}).')
+            hand_out(party, item, ask)
+        return
+    print('The tunnel was a trap. Kobolds pour out of the walls, and they strike first!')
+    # Ambushers come from the stage's toughest kobolds.
+    monster = spawn(roll_on_table(stage.encounters[-1][1], rng))
+    monster_turn(party, monster, 0, rng)
+    if party.alive and fight(party, monster, rng, ask):
+        after_victory(party, monster, rng, ask, camp=False)
+
+
+def fork(party, stage, kills, rng=random, ask=input):
+    print('')
+    print('The tunnel splits three ways.')
+    print('  Left: the ring of a hammer on an anvil. A forge.')
+    print('  Middle: lantern light and haggling. A kobold trader.')
+    print('  Right: a dark, narrow tunnel. Could be treasure. Could be teeth.')
+    show_party('fork', party)
+    way = choose(ask, 'Which way?', ['Forge', 'Trader', 'Tunnel'])
+    if way == 'Forge':
+        visit_forge(party, ask)
+    elif way == 'Trader':
+        visit_trader(party, rng, ask)
+    else:
+        dark_tunnel(party, stage, kills, rng, ask)
+    show_party('explore', party)
+    print('-----------------------------------------------------')
 
 
 def claim_boss_drop(party, boss, ask=input):
@@ -1696,8 +1942,8 @@ def main():
     show_party('explore', party)
 
     print('As you venture into the cavern the light from the entrance fades from view. '
-          'In front of you is 3 branching paths.')
-    input('[Left / Middle / Right] ')
+          'In front of you is 3 branching paths. You take the one that smells least of '
+          'kobold. They all smell of kobold.')
     play(party)
 
 

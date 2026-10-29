@@ -92,6 +92,21 @@ the Upper Mines turn up Fine and Firebrand gear, the Deep Warrens Firebrand and
 Mithril, and the Hoard Mithril and Dragonbone. Rogues can carry a parrying
 dagger in their off hand instead of a second sword: less attack, more health.
 
+Twice in each of the first two stages, and once in the Hoard, the tunnel
+splits three ways:
+
+- **The Forge:** break bag items down into scrap (1 to 4 each, by tier) and
+  spend scrap to reforge a hero's equipped weapon, shield or staff, up to +3.
+  Reforges cost 1, 2, then 3 scrap.
+- **The Trader:** spend gold on bandages (8), a Troll's Blood Vial (20), a
+  trinket (30), or a skill tome (45) that teaches one of your heroes a new
+  skill. He'll also buy your old gear.
+- **A dark tunnel:** half the time a forgotten cache of gold and maybe an
+  item; half the time an ambush by the stage's toughest kobolds, who strike
+  first. Win, and you keep its XP and gold.
+
+Kobolds drop gold when they fall, and bosses drop a lot of it.
+
 Every hero also has a trinket slot:
 
 | Trinket | Effect |
@@ -126,7 +141,10 @@ To see every dice roll, set `DEBUG = True` at the top of `kobold_cave.py`.
 [Pyodide](https://pyodide.org) (Python compiled to WebAssembly). Menus become
 buttons, number keys pick options, and a picture panel shows pixel-art
 portraits, health bars and mana for each fight. The newest turn is always at
-the top of the log, just under your choices. A party panel on the left has a
+the top of the log, just under your choices, and its text arrives a line at a
+time so it can be followed (click the log or press any key to show the rest at
+once). After each fight a spoils card sums up the XP, gold, loot, bandages and
+healing. A party panel on the left has a
 tab per hero with their stats, gear and skills (with cooldowns), and field
 notes on the right show the current enemy's abilities, your progress through
 the stages, and your supplies. On narrower screens the two panels open as
