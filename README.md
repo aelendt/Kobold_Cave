@@ -7,21 +7,35 @@ Kobold Mines: the Upper Mines, the Deep Warrens and the Hoard. Each ends with a
 boss: the Kobold Leader, the Kobold Warchief, and finally Cinderjaw the Red,
 the dragon the kobolds serve.
 
-Each class carries different gear and finds loot to match:
+Each class carries different gear, finds loot to match, and has its own
+specials. Two more skills per class are learned by keeping a boss's hoard:
 
-| Class   | Gear            | Special                                         |
-|---------|-----------------|-------------------------------------------------|
-| Warrior | Sword & shield  | None, just a lot of health                      |
-| Rogue   | Two swords      | Flee (not from bosses)                          |
-| Wizard  | Staff & shield  | Fireball, which costs mana; staves add spell power or mana |
+| Class   | Gear           | Starts with                  | Can learn                        |
+|---------|----------------|------------------------------|----------------------------------|
+| Warrior | Sword & shield | (a lot of health)            | Cleave, then Shield Wall         |
+| Rogue   | Two swords     | Flee                         | Stunning Strike, then Backstab   |
+| Wizard  | Staff & shield | Fireball, Mend               | Frost Bolt, then Meteor          |
+
+- **Fireball** (1 mana): heavy damage, but can misfire and burn you.
+- **Mend** (1 mana): heal yourself or an ally.
+- **Frost Bolt** (1 mana): never misses, and may freeze the enemy out of its next turn.
+- **Meteor** (2 mana): double spell power, guaranteed.
+- **Cleave**: a double-damage swing. Every 3 rounds.
+- **Shield Wall**: guard, and draw every strike to you this round. Every 3 rounds.
+- **Stunning Strike**: a hit that makes the enemy lose its next turn. Every 3 rounds.
+- **Backstab**: double damage, quadruple against a stunned enemy. Every 3 rounds.
+
+Bosses shake off half of all stuns. Staves add spell power or mana.
 
 Fights go in rounds: every hero in your party gets orders, then the enemy
 strikes back at one of you. Defending sets up a parry or counterattack if
 you're the one it targets.
 
-After the first two bosses you can free a prisoner from the boss's cage to
-join your party (up to three heroes), or keep the hoard to power up your hero.
-A fallen companion stays down; the run ends when the whole party falls.
+After the first two bosses you choose: free a prisoner from the boss's cage
+to join your party (up to three heroes), or leave them and keep the hoard,
+which powers up your hero and teaches them their next skill. Recruiting never
+powers you up as well. A fallen companion stays down; the run ends when the
+whole party falls.
 
 Swords add attack and shields add max HP. When you find something for a full
 slot, you choose whether to swap it in. After every fight you rest, recovering

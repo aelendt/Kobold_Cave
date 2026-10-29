@@ -189,7 +189,7 @@ class HealingTests(unittest.TestCase):
 class CombatTests(unittest.TestCase):
     def test_attack_deals_your_attack_plus_a_roll(self):
         warrior, miner = hero(), game.spawn('kobold_miner')
-        quietly(game.attack, warrior, miner, FakeRng(1))
+        quietly(game.attack, warrior, party_of(warrior), miner, FakeRng(1), None)
         self.assertEqual(miner.health, 35 - 16)
 
     def test_kobold_hits_when_dodge_fails(self):
@@ -213,19 +213,20 @@ class CombatTests(unittest.TestCase):
     def test_fireball_uses_spell_power_and_mana(self):
         wizard, heavy = hero('wizard'), game.spawn('kobold_heavy')
         game.equip(wizard, 'Staff', game.ITEMS['apprentice_staff'])
-        quietly(game.cast_fireball, wizard, heavy, FakeRng(10))
+        quietly(game.take_turn, wizard, party_of(wizard), heavy, FakeRng(10), answers('fireball'))
         self.assertEqual((heavy.health, wizard.mana), (90 - 70, 4))
 
     def test_fireball_misfire_burns_the_wizard(self):
         wizard = hero('wizard')
-        quietly(game.cast_fireball, wizard, game.spawn('kobold_miner'), FakeRng(1))
+        quietly(game.cast_fireball, wizard, party_of(wizard), game.spawn('kobold_miner'),
+                FakeRng(1), None)
         self.assertEqual(wizard.health, 130 - 30)
 
     def test_no_fireball_without_mana(self):
         wizard = hero('wizard', attack=200)
         wizard.mana = 0
         won, out = captured(game.fight, party_of(wizard), game.spawn('kobold_miner'),
-                            FakeRng(0), answers('cast: fireball', 'attack'))
+                            FakeRng(0), answers('fireball', 'attack'))
         self.assertIn('out of mana', out)
         self.assertTrue(won)
 
@@ -296,6 +297,85 @@ class CombatTests(unittest.TestCase):
         self.assertFalse(won)
 
 
+class SkillTests(unittest.TestCase):
+    def test_classes_start_with_their_specials(self):
+        self.assertEqual(hero('wizard').actions, ['Fireball', 'Mend'])
+        self.assertEqual(hero('rogue').actions, ['Flee'])
+        self.assertEqual(hero().actions, [])
+
+    def test_mend_heals_the_chosen_ally_and_costs_mana(self):
+        wizard, rogue = hero('wizard'), companion()
+        rogue.health = 50
+        party = party_of(wizard, rogue)
+        quietly(game.take_turn, wizard, party, game.spawn('kobold_miner'), FakeRng(),
+                answers('mend', 'mira'))
+        self.assertEqual((rogue.health, wizard.mana), (50 + round(60 * game.MEND_POWER), 4))
+
+    def test_mend_on_your_own_heals_yourself(self):
+        wizard = hero('wizard')
+        wizard.health = 40
+        quietly(game.take_turn, wizard, party_of(wizard), game.spawn('kobold_miner'), FakeRng(),
+                answers('mend'))
+        self.assertEqual(wizard.health, 40 + round(60 * game.MEND_POWER))
+
+    def test_frost_bolt_can_freeze_a_kobold_out_of_its_turn(self):
+        wizard, heavy = hero('wizard'), game.spawn('kobold_heavy')
+        party = party_of(wizard)
+        quietly(game.frost_bolt, wizard, party, heavy, FakeRng(1), None)
+        self.assertEqual(heavy.health, 90 - 36)
+        _, out = captured(game.monster_turn, party, heavy, 1, FakeRng())
+        self.assertIn('loses its turn', out)
+        self.assertEqual(wizard.health, 130)
+
+    def test_meteor_costs_two_mana(self):
+        wizard, heavy = hero('wizard'), game.spawn('kobold_heavy')
+        wizard.actions.append('Meteor')
+        wizard.mana = 1
+        _, out = captured(game.take_turn, wizard, party_of(wizard), heavy, FakeRng(0),
+                          answers('meteor', 'attack'))  # refused, then a normal attack
+        self.assertIn('out of mana', out)
+
+    def test_bosses_shake_off_half_of_all_stuns(self):
+        leader = game.spawn('kobold_leader')
+        quietly(game.stun, leader, FakeRng(1))
+        self.assertFalse(leader.stunned)
+        quietly(game.stun, leader, FakeRng(2))
+        self.assertTrue(leader.stunned)
+
+    def test_cleave_doubles_damage_then_needs_three_rounds(self):
+        warrior, guard = hero(), game.spawn('kobold_guard')
+        warrior.actions.append('Cleave')
+        party = party_of(warrior)
+        quietly(game.take_turn, warrior, party, guard, FakeRng(0), answers('cleave'))
+        self.assertEqual(guard.health, 55 - 30)
+        _, out = captured(game.take_turn, warrior, party, guard, FakeRng(0),
+                          answers('cleave', 'attack'))
+        self.assertIn('not ready to use Cleave again (3 more rounds)', out)
+        for _ in range(3):
+            quietly(game.monster_turn, party, guard, 1, FakeRng(0, 3))
+        self.assertEqual(warrior.cooldowns, {})
+
+    def test_shield_wall_draws_every_strike(self):
+        warrior, rogue = hero(), companion()
+        warrior.actions.append('Shield Wall')
+        party = party_of(warrior, rogue)
+        warchief = game.spawn('kobold_warchief')
+        quietly(game.take_turn, warrior, party, warchief, FakeRng(), answers('shield wall'))
+        # two strikes, no target rolls: both parried by the warrior
+        quietly(game.monster_turn, party, warchief, 1, FakeRng(0, 3, 0, 3))
+        self.assertEqual((warrior.health, rogue.health), (150, 120))
+
+    def test_stunned_enemies_take_a_brutal_backstab(self):
+        rogue, heavy = hero('rogue'), game.spawn('kobold_heavy')
+        party = party_of(rogue)
+        rogue.actions += ['Stunning Strike', 'Backstab']
+        quietly(game.take_turn, rogue, party, heavy, FakeRng(0), answers('stunning strike'))
+        self.assertTrue(heavy.stunned)
+        quietly(game.monster_turn, party, heavy, 1, FakeRng())  # loses its turn
+        quietly(game.take_turn, rogue, party, heavy, FakeRng(0), answers('backstab'))
+        self.assertEqual(heavy.health, 90 - 12 - 48)
+
+
 class RewardTests(unittest.TestCase):
     def test_freeing_a_prisoner_adds_them_with_gear(self):
         party = party_of(hero())
@@ -313,16 +393,32 @@ class RewardTests(unittest.TestCase):
         quietly(game.boss_reward, party, 1, answers('hilda'))
         self.assertEqual([member.name for member in party.members], ['Test', 'Hilda'])
 
-    def test_power_up_strengthens_the_hero(self):
+    def test_keeping_the_hoard_powers_up_and_teaches_a_skill(self):
         warrior = hero()
         warrior.health = 100
         quietly(game.boss_reward, party_of(warrior), 0, answers('power up'))
-        self.assertEqual((warrior.attack, warrior.max_health, warrior.health), (27, 250, 200))
+        self.assertEqual((warrior.attack, warrior.max_health, warrior.health), (24, 225, 175))
+        self.assertEqual(warrior.actions, ['Cleave'])
 
-    def test_a_full_party_powers_up_without_asking(self):
+    def test_each_hoard_teaches_the_next_skill(self):
+        rogue = hero('rogue')
+        quietly(game.boss_reward, party_of(rogue), 0, answers('power up'))
+        quietly(game.boss_reward, party_of(rogue), 1, answers('power up'))
+        self.assertEqual(rogue.actions, ['Flee', 'Stunning Strike', 'Backstab'])
+        quietly(game.power_up, rogue)  # nothing left to learn, but the boon still stacks
+        self.assertEqual(len(rogue.actions), 3)
+        self.assertEqual(len(rogue.boons), 3)
+
+    def test_recruiting_gives_no_power_up(self):
+        warrior = hero()
+        quietly(game.boss_reward, party_of(warrior), 0, answers('mira'))
+        self.assertEqual((warrior.boons, warrior.actions), ([], []))
+
+    def test_a_full_party_gets_nothing_extra(self):
         party = party_of(hero(), companion(), companion('wizard', 'Ysolde'))
         quietly(game.boss_reward, party, 1, answers())
-        self.assertEqual(party.members[0].boons, [game.BOONS['Warrior']])
+        self.assertEqual(party.members[0].boons, [])
+        self.assertEqual(len(party.members), 3)
 
 
 class FlowTests(unittest.TestCase):

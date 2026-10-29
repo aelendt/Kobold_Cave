@@ -171,6 +171,7 @@ form { display: flex; gap: 0.5rem; }
 .supplies { font-size: 0.75rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--dust-dim); }
 .jobs.recruits { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 button.job.boon { border-color: rgba(243, 195, 79, 0.45); }
+button.job .lesson { color: var(--gold); }
 .who { font-weight: 700; color: var(--dust); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .what { font-size: 0.8rem; color: var(--dust-dim); }
 .badge {
@@ -314,7 +315,8 @@ function classify(line) {
   if (/GAME OVER|Kobolds slain/.test(line)) return 'death';
   if (/actually made it out|collapses onto his pile/.test(line)) return 'victory';
   if (/^You have encountered|blocks your path\. What will you do/.test(line)) return 'encounter';
-  if (/You are struck|CRITICAL FAIL|blow to the head/.test(line)) return 'hurt';
+  if (/You are struck|CRITICAL FAIL|blow to the head|has fallen|You collapse/.test(line)) return 'hurt';
+  if (/is stunned|loses its turn|You also learn|also learns/.test(line)) return 'victory';
   if (/^\s*([\w' ]+ HP|Mana): -?\d+(\/\d+)?$/.test(line)) return 'panel';  // drawn in the panel instead
   if (/^Creep Score:/.test(line)) return 'stat';
   return '';

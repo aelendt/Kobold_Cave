@@ -148,6 +148,7 @@ function jobCards(jobs, pick) {
       card.append(row);
     }
     card.append(element('div', 'what', job.special || 'No special move'),
+                element('div', 'what', `Learns ${job.lessons.join(', ')}`),
                 element('div', 'what', job.gear.join(' & ')));
     grid.append(card);
   });
@@ -178,6 +179,10 @@ function recruitCards({ prisoners, boon }, pick) {
   heading.append(element('kbd', '', String(options.length)), document.createTextNode('Power up'));
   chest.append(portrait, heading, element('div', 'what', `${boon.name} for ${boon.for}`),
                element('div', 'what', boon.describe));
+  if (boon.lesson) {
+    const lesson = element('div', 'what lesson', `Learn ${boon.lesson}: ${boon.lesson_describe}`);
+    chest.append(lesson);
+  }
   grid.append(chest);
   return grid;
 }

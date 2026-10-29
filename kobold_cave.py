@@ -7,6 +7,7 @@ DEBUG = False  # set to True to see every dice roll
 
 REST_HEAL = 0.15  # fraction of max HP recovered after each fight
 BANDAGE_HEAL = 0.4  # fraction of max HP a bandage restores
+MEND_POWER = 0.6  # Mend heals this fraction of the caster's spell power
 START_BANDAGES = 2
 MAX_PARTY = 3
 
@@ -70,11 +71,12 @@ ITEMS = {
     'crystal_staff': Item('Crystal Staff', 'staff', spell_power=10, mana=2),
 }
 
-# Power-ups offered after a boss, instead of freeing a prisoner.
+# Power-ups offered after a boss, instead of freeing a prisoner. Keeping the
+# hoard also teaches the hero's next skill (Job.lessons).
 BOONS = {
-    'Warrior': Item("Warlord's Vigour", 'boon', attack=12, max_health=100),
-    'Rogue': Item('Shadow Training', 'boon', attack=14, max_health=60),
-    'Wizard': Item('Arcane Mastery', 'boon', spell_power=30, mana=2, max_health=60),
+    'Warrior': Item("Warlord's Vigour", 'boon', attack=9, max_health=75),
+    'Rogue': Item('Shadow Training', 'boon', attack=10, max_health=45),
+    'Wizard': Item('Arcane Mastery', 'boon', spell_power=20, mana=1, max_health=45),
 }
 
 
@@ -115,20 +117,23 @@ class Job:
     dodge: int
     slots: dict  # slot name -> kind of item it holds
     loot: dict  # 'common' / 'rare' -> loot table
-    special: str | None = None  # extra action shown in the combat menu
-    special_power: int = 0
+    spell_power: int = 0
     mana: int = 0
+    actions: tuple = ()  # specials known from the start, see ACTIONS
+    lessons: tuple = ()  # skills learned, in order, by keeping a boss's hoard
 
 
 JOBS = {
     'warrior': Job('Warrior', health=150, attack=15, dodge=3,
-                   slots={'Weapon': 'sword', 'Shield': 'shield'}, loot=WARRIOR_LOOT),
+                   slots={'Weapon': 'sword', 'Shield': 'shield'}, loot=WARRIOR_LOOT,
+                   lessons=('Cleave', 'Shield Wall')),
     'rogue': Job('Rogue', health=120, attack=12, dodge=4,
                  slots={'Main hand': 'sword', 'Off hand': 'sword'}, loot=ROGUE_LOOT,
-                 special='Flee'),
+                 actions=('Flee',), lessons=('Stunning Strike', 'Backstab')),
     'wizard': Job('Wizard', health=130, attack=10, dodge=3,
                   slots={'Staff': 'staff', 'Shield': 'shield'}, loot=WIZARD_LOOT,
-                  special='Cast: Fireball', special_power=60, mana=5),
+                  spell_power=60, mana=5, actions=('Fireball', 'Mend'),
+                  lessons=('Frost Bolt', 'Meteor')),
 }
 
 
@@ -141,12 +146,16 @@ class Character:
     hero: bool = False  # the player's own character, narrated as "you"
     equipment: dict = field(default_factory=dict)  # slot name -> Item or None
     boons: list = field(default_factory=list)  # power-ups taken after bosses
+    actions: list = field(default_factory=list)  # specials this hero knows
+    cooldowns: dict = field(default_factory=dict)  # action name -> rounds left
     defending: bool = False  # chose Defend this round
+    shield_wall: bool = False  # drawing every strike this round
 
     @classmethod
     def create(cls, name, job, hero=False):
         return cls(name, job, job.health, job.mana, hero,
-                   equipment={slot: None for slot in job.slots})
+                   equipment={slot: None for slot in job.slots},
+                   actions=list(job.actions))
 
     def _bonus(self, stat):
         gear = [item for item in self.equipment.values() if item] + self.boons
@@ -162,7 +171,7 @@ class Character:
 
     @property
     def spell_power(self):
-        return self.job.special_power + self._bonus('spell_power')
+        return self.job.spell_power + self._bonus('spell_power')
 
     @property
     def max_mana(self):
@@ -185,15 +194,17 @@ def print_job_stats(job):
     print(f'      Dodge: {job.dodge}')
     if job.mana:
         print(f'       Mana: {job.mana}')
-    if job.special:
-        print(f'Special ATK: {job.special}')
+    if job.actions:
+        print(f'Special ATK: {", ".join(job.actions)}')
+    print(f'  Can learn: {", ".join(job.lessons)}')
     print(f'       Gear: {" & ".join(job.slots)}')
 
 
 def job_view(job):
     return {'name': job.name, 'health': job.health, 'attack': job.attack,
-            'dodge': job.dodge, 'mana': job.mana, 'special': job.special,
-            'gear': list(job.slots)}
+            'dodge': job.dodge, 'mana': job.mana,
+            'special': ', '.join(job.actions) or None,
+            'lessons': list(job.lessons), 'gear': list(job.slots)}
 
 
 def hero_view(character):
@@ -372,6 +383,8 @@ class Monster:
     attacks: int = 1  # strikes per round
     breath: int = 0  # if set, every third round hits the whole party this hard
     called: str = 'the kobold'  # how the narration refers to it mid-fight
+    stunned: bool = False  # loses its next turn
+    dazed: bool = False  # lost its last turn to a stun
     max_health: int = 0  # filled in from health
 
     def __post_init__(self):
@@ -384,8 +397,10 @@ BESTIARY = {
     'kobold_heavy': Monster('Kobold Heavy', health=90, attack=25, loot_tier='rare'),
     'kobold_shaman': Monster('Kobold Shaman', health=70, attack=24),
     'kobold_dragonguard': Monster('Kobold Dragonguard', health=120, attack=30, loot_tier='rare'),
-    'kobold_leader': Monster('Kobold Leader', health=160, attack=28, boss=True),
-    'kobold_warchief': Monster('Kobold Warchief', health=360, attack=30, boss=True, attacks=2),
+    'kobold_leader': Monster('Kobold Leader', health=160, attack=28, boss=True,
+                             called='the Leader'),
+    'kobold_warchief': Monster('Kobold Warchief', health=360, attack=30, boss=True, attacks=2,
+                               called='the Warchief'),
     'red_dragon': Monster('Cinderjaw the Red', health=680, attack=34, boss=True, attacks=2,
                           breath=30, called='Cinderjaw'),
 }
@@ -466,42 +481,14 @@ def encounter_table(stage, kills):
 
 # --- Combat ---------------------------------------------------------------
 # Each round every living party member acts, then the monster strikes back.
+# Every choice in the combat menu is an Action in ACTIONS below.
 
-def attack(member, monster, rng):
-    damage = member.attack + rng.randint(-2, 2)
-    monster.health -= damage
-    narrate(member, f'You strike {monster.called} dealing {damage} damage.',
-            f'{{name}} strikes {monster.called} dealing {damage} damage.')
+RETRY = 'retry'  # the action couldn't happen; ask again without using the turn
+FLED = 'fled'
 
 
-def defend(member):
-    member.defending = True
-    narrate(member, 'You raise your guard.', '{name} raises their guard.')
-
-
-def flee(member, monster, rng):
-    """The whole party runs for it. Returns True if you got away."""
-    if rng.randint(1, 5) >= 4:
-        print(f'You get away from {monster.called}.')
-        return True
-    narrate(member, f'You fail to escape {monster.called}.',
-            f'{{name}} looks for a way out, but {monster.called} blocks it.')
-    return False
-
-
-def cast_fireball(member, monster, rng):
-    member.mana -= 1
-    roll = rng.randint(1, 10)
-    debug(f'Misfire Roll: {roll}')
-    power = member.spell_power
-    if roll <= 2:
-        wound(member, power // 2, 'CRITICAL FAIL: Fireball Misfire',
-              "CRITICAL FAIL: {name}'s fireball misfires")
-    elif roll <= 4:
-        print(f'The fireball passes harmlessly over {monster.called}\'s head.')
-    else:
-        print(f'The fireball hits {monster.called} square in the chest. The enemy is staggered.')
-        monster.health -= power
+def capitalised(text):
+    return text[0].upper() + text[1:]
 
 
 def wound(member, damage, you, them):
@@ -516,6 +503,152 @@ def wound(member, damage, you, them):
 def hit(member, damage):
     wound(member, damage, f'You are struck for {damage} damage.',
           f'{{name}} is struck for {damage} damage.')
+
+
+def stun(monster, rng):
+    """Ordinary kobolds always lose their next turn; bosses shake off half."""
+    if monster.boss and rng.randint(1, 2) == 1:
+        print(f'{capitalised(monster.called)} shakes it off.')
+        return
+    monster.stunned = True
+    print(f'{capitalised(monster.called)} is stunned and will lose its next turn.')
+
+
+def choose_ally(party, ask, question):
+    if len(party.living) == 1:
+        return party.living[0]
+    options = {member.name.lower(): member for member in party.living}
+    while True:
+        names = ' / '.join(member.name for member in party.living)
+        answer = ask(f'{question} [{names}] ').strip().lower()
+        if answer in options:
+            return options[answer]
+        print('Please select a valid option.')
+
+
+def strike(member, monster, damage, you, them):
+    monster.health -= damage
+    narrate(member, you.format(target=monster.called, damage=damage),
+            them.format(name='{name}', target=monster.called, damage=damage))
+
+
+def attack(member, party, monster, rng, ask):
+    strike(member, monster, member.attack + rng.randint(-2, 2),
+           'You strike {target} dealing {damage} damage.',
+           '{name} strikes {target} dealing {damage} damage.')
+
+
+def defend(member, party, monster, rng, ask):
+    member.defending = True
+    narrate(member, 'You raise your guard.', '{name} raises their guard.')
+
+
+def flee(member, party, monster, rng, ask):
+    """The whole party runs for it."""
+    if monster.boss:
+        print(f'There is no escaping {monster.called}.')
+        return RETRY
+    if rng.randint(1, 5) >= 4:
+        print(f'You get away from {monster.called}.')
+        return FLED
+    narrate(member, f'You fail to escape {monster.called}.',
+            f'{{name}} looks for a way out, but {monster.called} blocks it.')
+
+
+def cast_fireball(member, party, monster, rng, ask):
+    roll = rng.randint(1, 10)
+    debug(f'Misfire Roll: {roll}')
+    power = member.spell_power
+    if roll <= 2:
+        wound(member, power // 2, 'CRITICAL FAIL: Fireball Misfire',
+              "CRITICAL FAIL: {name}'s fireball misfires")
+    elif roll <= 4:
+        print(f"The fireball passes harmlessly over {monster.called}'s head.")
+    else:
+        print(f'The fireball hits {monster.called} square in the chest. The enemy is staggered.')
+        monster.health -= power
+
+
+def mend(member, party, monster, rng, ask):
+    target = choose_ally(party, ask, 'Mend whom?')
+    healed = heal(target, round(member.spell_power * MEND_POWER))
+    caster = 'You' if member.hero else member.name
+    whom = ('yourself' if member.hero else 'themselves') if target is member else \
+        ('you' if target.hero else target.name)
+    print(f'{caster} {"cast" if member.hero else "casts"} Mend on {whom}, '
+          f'restoring {healed} HP.')
+
+
+def frost_bolt(member, party, monster, rng, ask):
+    damage = round(member.spell_power * 0.6)
+    monster.health -= damage
+    print(f'A shard of ice slams into {monster.called} for {damage} damage.')
+    if monster.health > 0 and rng.randint(1, 2) == 1:
+        stun(monster, rng)
+
+
+def meteor(member, party, monster, rng, ask):
+    damage = member.spell_power * 2
+    monster.health -= damage
+    print(f'A meteor tears through the ceiling and lands on {monster.called} '
+          f'for {damage} damage.')
+
+
+def cleave(member, party, monster, rng, ask):
+    strike(member, monster, member.attack * 2 + rng.randint(-2, 2),
+           'You put your whole weight into it and cleave {target} for {damage} damage.',
+           '{name} cleaves {target} for {damage} damage.')
+
+
+def shield_wall(member, party, monster, rng, ask):
+    member.defending = member.shield_wall = True
+    narrate(member, 'You plant your shield. Everything comes at you this round.',
+            "{name} plants their shield and draws the enemy's attention.")
+
+
+def stunning_strike(member, party, monster, rng, ask):
+    strike(member, monster, member.attack + rng.randint(-2, 2),
+           'You crack {target} across the skull for {damage} damage.',
+           '{name} cracks {target} across the skull for {damage} damage.')
+    if monster.health > 0:
+        stun(monster, rng)
+
+
+def backstab(member, party, monster, rng, ask):
+    helpless = monster.stunned or monster.dazed
+    damage = member.attack * (4 if helpless else 2) + rng.randint(-2, 2)
+    strike(member, monster, damage,
+           'You slip behind {target} and stab for {damage} damage.',
+           '{name} slips behind {target} and stabs for {damage} damage.')
+    if helpless:
+        print('It never saw it coming.')
+
+
+@dataclass(frozen=True)
+class Action:
+    name: str
+    perform: object  # function(member, party, monster, rng, ask)
+    description: str
+    mana: int = 0
+    cooldown: int = 0  # rounds to wait before using it again
+
+
+ACTIONS = {action.name: action for action in (
+    Action('Attack', attack, 'Hit with your weapons.'),
+    Action('Defend', defend, 'Parry, and maybe counter, if the enemy comes for you.'),
+    Action('Flee', flee, 'Get the whole party away. Not from bosses.'),
+    Action('Fireball', cast_fireball, 'Heavy fire damage, but it can misfire.', mana=1),
+    Action('Mend', mend, 'Heal yourself or an ally.', mana=1),
+    Action('Frost Bolt', frost_bolt, 'Never misses, and may freeze the enemy in place.', mana=1),
+    Action('Meteor', meteor, 'Double spell power, guaranteed. Costs 2 mana.', mana=2),
+    Action('Cleave', cleave, 'A double-damage swing. Every 3 rounds.', cooldown=3),
+    Action('Shield Wall', shield_wall, 'Guard, and draw every strike to you this round. '
+                                       'Every 3 rounds.', cooldown=3),
+    Action('Stunning Strike', stunning_strike, 'A hit that makes the enemy lose its next turn. '
+                                               'Every 3 rounds.', cooldown=3),
+    Action('Backstab', backstab, 'Double damage, quadruple against a stunned enemy. '
+                                 'Every 3 rounds.', cooldown=3),
+)}
 
 
 def monster_strikes(target, monster, rng):
@@ -540,7 +673,7 @@ def monster_strikes(target, monster, rng):
     dodge_roll = target.dodge + rng.randint(-2, 3)
     debug(f'Dodge Roll: {dodge_roll}')
     if dodge_roll >= 4:
-        attacker = monster.called[0].upper() + monster.called[1:]
+        attacker = capitalised(monster.called)
         narrate(target, f'{attacker} swings at you and misses.',
                 f'{attacker} swings at {{name}} and misses.')
     else:
@@ -548,7 +681,11 @@ def monster_strikes(target, monster, rng):
 
 
 def monster_turn(party, monster, round_number, rng):
-    if monster.breath and round_number % 3 == 0:
+    monster.dazed = False
+    if monster.stunned:
+        monster.stunned, monster.dazed = False, True
+        print(f'{capitalised(monster.called)} is still reeling and loses its turn.')
+    elif monster.breath and round_number % 3 == 0:
         print(f'{monster.name} breathes a roaring torrent of fire!')
         for member in party.living:
             damage = monster.breath + rng.randint(-3, 3)
@@ -557,50 +694,56 @@ def monster_turn(party, monster, round_number, rng):
     else:
         for _ in range(monster.attacks):
             if party.alive and monster.health > 0:
-                monster_strikes(pick(party.living, rng), monster, rng)
+                walls = [member for member in party.living if member.shield_wall]
+                target = walls[0] if walls else pick(party.living, rng)
+                monster_strikes(target, monster, rng)
     for member in party.members:
-        member.defending = False
+        member.defending = member.shield_wall = False
+        member.cooldowns = {name: rounds - 1 for name, rounds in member.cooldowns.items()
+                            if rounds > 1}
 
 
 def take_turn(member, party, monster, rng, ask):
     """Ask one party member for orders. Returns True if the party fled."""
-    options = ['Attack', 'Defend']
-    if member.job.special:
-        options.append(member.job.special)
+    options = ['Attack', 'Defend'] + member.actions
+    by_name = {option.lower(): option for option in options}
     who = f'{member.name}: ' if len(party.living) > 1 else ''
     menu = f'{who}[{" / ".join(options)}] '
     while True:
-        action = ask(menu).strip().lower()
+        answer = ask(menu).strip().lower()
         print('')
-        if action == 'attack':
-            attack(member, monster, rng)
-        elif action == 'defend':
-            defend(member)
-        elif action == 'flee' and member.job.special == 'Flee':
-            if monster.boss:
-                print(f'There is no escaping the {monster.name}.')
-                continue
-            if flee(member, monster, rng):
-                return True
-        elif action == 'cast: fireball' and member.job.special == 'Cast: Fireball':
-            if member.mana < 1:
-                narrate(member, 'You reach for your magic and find nothing left. You are out of mana.',
-                        '{name} is out of mana.')
-                continue
-            cast_fireball(member, monster, rng)
-        else:
+        if answer not in by_name:
             print('Please select a valid action.')
             continue
-        return False
+        action = ACTIONS[by_name[answer]]
+        waiting = member.cooldowns.get(action.name)
+        if waiting:
+            rounds = f'{waiting} more round{"s" if waiting > 1 else ""}'
+            narrate(member, f'You are not ready to use {action.name} again ({rounds}).',
+                    f'{{name}} is not ready to use {action.name} again ({rounds}).')
+            continue
+        if member.mana < action.mana:
+            narrate(member, 'You reach for your magic and find nothing left. You are out of mana.',
+                    '{name} is out of mana.')
+            continue
+        result = action.perform(member, party, monster, rng, ask)
+        if result == RETRY:
+            continue
+        member.mana -= action.mana
+        if action.cooldown:
+            member.cooldowns[action.name] = action.cooldown
+        return result == FLED
 
 
 def fight(party, monster, rng=random, ask=input):
     """Returns True if the monster was slain, False if the party fled or fell."""
     print('')
-    if monster.called == 'the kobold':
+    if monster.called.startswith('the '):
         print(f'You have encountered a {monster.name}. What will you do?')
     else:
         print(f'{monster.name} blocks your path. What will you do?')
+    for member in party.members:
+        member.cooldowns = {}
     round_number = 0
     while party.alive and monster.health > 0:
         round_number += 1
@@ -645,35 +788,48 @@ def prisoner(job_key, stage_index):
     return member
 
 
+def next_lesson(member):
+    return next((name for name in member.job.lessons if name not in member.actions), None)
+
+
 def power_up(member):
-    boon = BOONS[member.job.name]
+    """Keep the hoard: a stat boon, plus the next skill for the hero's class."""
+    boon, lesson = BOONS[member.job.name], next_lesson(member)
     old_max_health, old_max_mana = member.max_health, member.max_mana
     member.boons.append(boon)
     member.health += member.max_health - old_max_health
     member.mana += member.max_mana - old_max_mana
     narrate(member, f'You claim the hoard and gain [{boon.name}] ({boon.describe()}).',
             f'{{name}} claims the hoard and gains [{boon.name}] ({boon.describe()}).')
+    if lesson:
+        member.actions.append(lesson)
+        narrate(member, f'You also learn {lesson}: {ACTIONS[lesson].description}',
+                f'{{name}} also learns {lesson}: {ACTIONS[lesson].description}')
 
 
 def boss_reward(party, stage_index, ask=input):
-    """After a boss: free a prisoner to join the party, or power up."""
+    """After a boss: free a prisoner to join the party, or keep the hoard to
+    power up and learn a skill. Recruiting never powers you up as well."""
     leader = party.living[0]
     if len(party.living) >= MAX_PARTY:
-        print('Your party is full, so you help yourselves to the hoard instead.')
-        power_up(leader)
+        print('Your party is full, so you let the prisoners go. '
+              'The hoard is far too heavy to carry with all of you.')
         return
     prisoners = [prisoner(job_key, stage_index) for job_key in JOBS]
-    boon = BOONS[leader.job.name]
+    boon, lesson = BOONS[leader.job.name], next_lesson(leader)
     print('In the corner of the lair is a cage of prisoners, all very keen to leave.')
     for member in prisoners:
         print(f'  {member.name} the {member.job.name}')
-    narrate(leader, f'Or you could keep the hoard for yourself: [{boon.name}] ({boon.describe()}).',
-            f'Or {{name}} could keep the hoard: [{boon.name}] ({boon.describe()}).')
+    learning = f' and learn {lesson}' if lesson else ''
+    narrate(leader, f'Or you could leave them and keep the hoard: [{boon.name}] '
+                    f'({boon.describe()}){learning}.',
+            f'Or {{name}} could keep the hoard: [{boon.name}] ({boon.describe()}){learning}.')
     show('recruit', prisoners=[{**hero_view(member), **job_view(member.job),
                                 'name': member.name, 'job': member.job.name}
                                for member in prisoners],
          boon={'name': boon.name, 'describe': boon.describe(), 'for': leader.name,
-               'job': leader.job.name})
+               'job': leader.job.name, 'lesson': lesson,
+               'lesson_describe': ACTIONS[lesson].description if lesson else None})
     options = {member.name.lower(): member for member in prisoners}
     labels = [member.name for member in prisoners] + ['Power up']
     while True:
