@@ -147,43 +147,49 @@ function jobCards(jobs, pick) {
                  element('span', 'nums', String(job[stat])));
       card.append(row);
     }
-    card.append(element('div', 'what', job.special || 'No special move'),
-                element('div', 'what', `Learns ${job.lessons.join(', ')}`),
+    card.append(element('div', 'what', job.special ? `Signature: ${job.special}` : 'No signature move'),
+                element('div', 'what', `Skills: 1 of ${job.skills.join(', ')}`),
+                element('div', 'what lesson', `Boons: ${job.boon_abilities.join(', ')}`),
                 element('div', 'what', job.gear.join(' & ')));
     grid.append(card);
   });
   return grid;
 }
 
-function recruitCards({ prisoners, boon }, pick) {
-  const grid = element('div', 'jobs recruits');
-  const options = [...prisoners.map(p => p.name), 'Power up'];
-  prisoners.forEach((prisoner, i) => {
-    const card = element('button', 'job');
-    card.type = 'button';
-    card.addEventListener('click', () => pick(prisoner.name));
+// A card button with a picture, a numbered heading and some lines of text.
+function choiceCard(spriteName, number, title, lines, onPick, extraClass = '') {
+  const card = element('button', `job ${extraClass}`.trim());
+  card.type = 'button';
+  card.addEventListener('click', onPick);
+  if (spriteName) {
     const portrait = element('div', 'portrait');
-    portrait.append(sprite(prisoner.job.toLowerCase()));
-    const heading = element('div', 'who');
-    heading.append(element('kbd', '', String(i + 1)), document.createTextNode(prisoner.name));
-    card.append(portrait, heading, element('div', 'what', `${prisoner.job} · ${prisoner.max_health} HP`),
-                element('div', 'what', prisoner.special || 'No special move'));
-    grid.append(card);
-  });
-  const chest = element('button', 'job boon');
-  chest.type = 'button';
-  chest.addEventListener('click', () => pick('Power up'));
-  const portrait = element('div', 'portrait');
-  portrait.append(sprite('chest'));
-  const heading = element('div', 'who');
-  heading.append(element('kbd', '', String(options.length)), document.createTextNode('Power up'));
-  chest.append(portrait, heading, element('div', 'what', `${boon.name} for ${boon.for}`),
-               element('div', 'what', boon.describe));
-  if (boon.lesson) {
-    const lesson = element('div', 'what lesson', `Learn ${boon.lesson}: ${boon.lesson_describe}`);
-    chest.append(lesson);
+    portrait.append(sprite(spriteName));
+    card.append(portrait);
   }
-  grid.append(chest);
+  const heading = element('div', 'who');
+  heading.append(element('kbd', '', String(number)), document.createTextNode(title));
+  card.append(heading);
+  lines.forEach(([text, cls]) => card.append(element('div', cls || 'what', text)));
+  return card;
+}
+
+function skillCards({ job, skills }, pick) {
+  const grid = element('div', 'jobs');
+  skills.forEach((skill, i) => grid.append(
+    choiceCard(job.toLowerCase(), i + 1, skill.name, [[skill.description]], () => pick(skill.name))));
+  return grid;
+}
+
+function recruitCards({ prisoners, boon, abilities }, pick) {
+  const grid = element('div', 'jobs recruits');
+  prisoners.forEach((prisoner, i) => grid.append(choiceCard(
+    prisoner.job.toLowerCase(), i + 1, prisoner.name,
+    [[`${prisoner.job} · ${prisoner.max_health} HP`], [`Knows ${prisoner.skill}`]],
+    () => pick(prisoner.name))));
+  abilities.forEach((ability, i) => grid.append(choiceCard(
+    'chest', prisoners.length + i + 1, ability.name,
+    [[ability.description, 'what lesson'], [`${boon.name} for ${boon.for}: ${boon.describe}`]],
+    () => pick(ability.name), 'boon')));
   return grid;
 }
 
@@ -193,6 +199,10 @@ export function showScene(scene, details, { pick }) {
   if (scene === 'jobs') {
     previous = { party: {}, enemy: null };
     panel.replaceChildren(jobCards(details.jobs, pick));
+    return;
+  }
+  if (scene === 'skills') {
+    panel.replaceChildren(skillCards(details, pick));
     return;
   }
   if (scene === 'recruit') {

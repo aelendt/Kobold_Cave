@@ -8,33 +8,56 @@ boss: the Kobold Leader, the Kobold Warchief, and finally Cinderjaw the Red,
 the dragon the kobolds serve.
 
 Each class carries different gear, finds loot to match, and has its own
-specials. Two more skills per class are learned by keeping a boss's hoard:
+moves. Every run you're offered 3 of your class's 5 skills and pick 1, so no
+two runs play quite the same. Keeping a boss's hoard teaches a Boon Ability:
+a powerful move with a longer cooldown.
 
-| Class   | Gear           | Starts with                  | Can learn                        |
-|---------|----------------|------------------------------|----------------------------------|
-| Warrior | Sword & shield | (a lot of health)            | Cleave, then Shield Wall         |
-| Rogue   | Two swords     | Flee                         | Stunning Strike, then Backstab   |
-| Wizard  | Staff & shield | Fireball, Mend               | Frost Bolt, then Meteor          |
+| Class   | Gear           | Signature  | Skills (start with 1 of 3)                                         | Boon Abilities          |
+|---------|----------------|------------|--------------------------------------------------------------------|-------------------------|
+| Warrior | Sword & shield | (none)     | Cleave, Shield Bash, Shield Wall, Second Wind, Battle Cry          | Execute, Last Stand     |
+| Rogue   | Two swords     | Flee       | Stunning Strike, Poison Blade, Smoke Bomb, Twin Strike, Pickpocket | Backstab, Assassinate   |
+| Wizard  | Staff & shield | Mana Surge | Fireball, Mend, Frost Bolt, Arcane Shield, Drain Life              | Meteor, Time Stop       |
 
-- **Fireball** (1 mana): heavy damage, but can misfire and burn you.
-- **Mend** (1 mana): heal yourself or an ally.
-- **Frost Bolt** (1 mana): never misses, and may freeze the enemy out of its next turn.
-- **Meteor** (2 mana): double spell power, guaranteed.
-- **Cleave**: a swing for 1.5x damage. Every 3 rounds.
-- **Shield Wall**: guard, and draw every strike to you this round. Every 3 rounds.
+**Warrior**
+- **Cleave**: 1.5x damage. Every 3 rounds.
+- **Shield Bash**: half damage, and stuns. Every 3 rounds.
+- **Shield Wall**: guard, and draw every strike to you this round. Every 2 rounds.
+- **Second Wind**: recover 25% of your max HP. Once per fight.
+- **Battle Cry**: the whole party hits 50% harder this round and next. Every 3 rounds.
+- **Execute** (Boon): a blow that adds a third of the damage the enemy has already taken. Every 4 rounds.
+- **Last Stand** (Boon): nothing can drop you below 1 HP for two rounds. Once per fight.
+
+**Rogue**
+- **Flee** (signature): get the whole party away. Not from bosses.
 - **Stunning Strike**: a hit that makes the enemy lose its next turn. Every 3 rounds.
-- **Backstab**: double damage, quadruple against a stunned enemy. Every 3 rounds.
+- **Poison Blade**: a hit that poisons the enemy for 3 rounds. Every 4 rounds.
+- **Smoke Bomb**: every enemy strike misses this round. Every 3 rounds.
+- **Twin Strike**: two quick hits at 0.75x. Every 2 rounds.
+- **Pickpocket**: a normal hit that also steals a roll of bandages. Once per fight.
+- **Backstab** (Boon): double damage, quadruple against a stunned enemy. Every 4 rounds.
+- **Assassinate** (Boon): triple damage against an enemy below 30% health. Every 4 rounds.
 
-Bosses shake off half of all stuns. Staves add spell power or mana.
+**Wizard**
+- **Mana Surge** (signature): spend your turn regaining 2 mana. Every 3 rounds.
+- **Fireball** (1 mana): heavy damage, but it sometimes misses or misfires.
+- **Mend** (1 mana): heal yourself or an ally.
+- **Frost Bolt** (1 mana): never misses, and may freeze the enemy in place.
+- **Arcane Shield** (1 mana): the party takes half damage this round, and the shield burns the enemy. Every 2 rounds.
+- **Drain Life** (1 mana): damage the enemy and heal yourself for half of it.
+- **Meteor** (Boon, 2 mana): double spell power, guaranteed. Every 3 rounds.
+- **Time Stop** (Boon, 3 mana): the enemy loses its next 2 turns, bosses included. Once per fight.
+
+Stuns make the enemy lose a turn; bosses shake off half of them. Staves add
+spell power or mana.
 
 Fights go in rounds: every hero in your party gets orders, then the enemy
 strikes back at one of you. Defending sets up a parry or counterattack if
 you're the one it targets.
 
 After the first two bosses you choose: free a prisoner from the boss's cage
-to join your party (up to three heroes), or leave them and keep the hoard,
-which powers up your hero and teaches them their next skill. Recruiting never
-powers you up as well. A fallen companion stays down; the run ends when the
+to join your party (up to three heroes, each knowing one random skill), or
+leave them and keep the hoard, which powers up your hero and teaches the Boon
+Ability you pick. Recruiting never powers you up as well. A fallen companion stays down; the run ends when the
 whole party falls.
 
 Swords add attack and shields add max HP. When you find something for a full
