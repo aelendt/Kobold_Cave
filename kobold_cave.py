@@ -1,9 +1,12 @@
 """Kobold Cave: a small text-based RPG."""
 
 import random
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 DEBUG = False  # set to True to see every dice roll
+
+BOSS_CS = 10  # creep score needed to reach the Kobold Leader
+REST_HEAL = 0.15  # fraction of max HP recovered after each fight
 
 
 def debug(message):
@@ -26,6 +29,64 @@ def roll_on_table(table, rng=random):
     raise AssertionError('unreachable: roll exceeded table total')
 
 
+# --- Items ----------------------------------------------------------------
+
+@dataclass(frozen=True)
+class Item:
+    name: str
+    kind: str  # which slot it fits: 'sword', 'shield' or 'staff'
+    attack: int = 0
+    max_health: int = 0
+    spell_power: int = 0
+    mana: int = 0
+
+    def describe(self):
+        bonuses = [(self.attack, 'attack'), (self.max_health, 'max HP'),
+                   (self.spell_power, 'spell power'), (self.mana, 'mana')]
+        return ', '.join(f'+{amount} {stat}' for amount, stat in bonuses if amount)
+
+
+ITEMS = {
+    'fine_sword': Item('Fine Sword', 'sword', attack=5),
+    'firebrand': Item('Firebrand Sword', 'sword', attack=10),
+    'mithril_blade': Item('Mithril Blade', 'sword', attack=15),
+    'fine_shield': Item('Fine Shield', 'shield', max_health=25),
+    'thick_shield': Item('Thick Kite Shield', 'shield', max_health=50),
+    'mithril_buckler': Item('Mithril Buckler', 'shield', max_health=75),
+    'apprentice_staff': Item('Apprentice Staff', 'staff', spell_power=10),
+    'staff_of_insight': Item('Staff of Insight', 'staff', mana=1),
+    'ember_staff': Item('Ember Staff', 'staff', spell_power=25),
+    'crystal_staff': Item('Crystal Staff', 'staff', spell_power=10, mana=2),
+}
+
+
+# Loot tables per job. Common loot is rolled on a d10 (None means the camp
+# is empty); rare loot is rolled on a d20 and tougher kobolds always carry
+# something.
+WARRIOR_LOOT = {
+    'common': ((2, ITEMS['fine_sword']), (2, ITEMS['fine_shield']),
+               (1, ITEMS['firebrand']), (1, ITEMS['thick_shield']), (4, None)),
+    'rare': ((2, ITEMS['fine_sword']), (3, ITEMS['fine_shield']),
+             (8, ITEMS['firebrand']), (5, ITEMS['thick_shield']),
+             (1, ITEMS['mithril_blade']), (1, ITEMS['mithril_buckler'])),
+}
+
+ROGUE_LOOT = {
+    'common': ((4, ITEMS['fine_sword']), (2, ITEMS['firebrand']), (4, None)),
+    'rare': ((5, ITEMS['fine_sword']), (13, ITEMS['firebrand']),
+             (2, ITEMS['mithril_blade'])),
+}
+
+WIZARD_LOOT = {
+    'common': ((2, ITEMS['apprentice_staff']), (2, ITEMS['fine_shield']),
+               (1, ITEMS['staff_of_insight']), (1, ITEMS['thick_shield']), (4, None)),
+    'rare': ((2, ITEMS['apprentice_staff']), (3, ITEMS['fine_shield']),
+             (4, ITEMS['ember_staff']), (4, ITEMS['staff_of_insight']),
+             (5, ITEMS['thick_shield']), (1, ITEMS['crystal_staff']),
+             (1, ITEMS['mithril_buckler'])),
+}
+
+
 # --- Jobs -----------------------------------------------------------------
 
 @dataclass(frozen=True)
@@ -34,15 +95,22 @@ class Job:
     health: int
     attack: int
     dodge: int
+    slots: dict  # slot name -> kind of item it holds
+    loot: dict  # 'common' / 'rare' -> loot table
     special: str | None = None  # extra action shown in the combat menu
     special_power: int = 0
+    mana: int = 0
 
 
 JOBS = {
-    'warrior': Job('Warrior', health=150, attack=15, dodge=3),
-    'rogue': Job('Rogue', health=120, attack=12, dodge=4, special='Flee'),
-    'wizard': Job('Wizard', health=100, attack=10, dodge=2,
-                  special='Cast: Fireball', special_power=50),
+    'warrior': Job('Warrior', health=150, attack=15, dodge=3,
+                   slots={'Weapon': 'sword', 'Shield': 'shield'}, loot=WARRIOR_LOOT),
+    'rogue': Job('Rogue', health=120, attack=12, dodge=4,
+                 slots={'Main hand': 'sword', 'Off hand': 'sword'}, loot=ROGUE_LOOT,
+                 special='Flee'),
+    'wizard': Job('Wizard', health=110, attack=10, dodge=3,
+                  slots={'Staff': 'staff', 'Shield': 'shield'}, loot=WIZARD_LOOT,
+                  special='Cast: Fireball', special_power=50, mana=4),
 }
 
 
@@ -51,13 +119,37 @@ class Character:
     name: str
     job: Job
     health: int
-    attack: int
-    dodge: int
+    mana: int
     cs: int = 0  # creep score: how many kobolds you have slain
+    equipment: dict = field(default_factory=dict)  # slot name -> Item or None
 
     @classmethod
     def create(cls, name, job):
-        return cls(name, job, job.health, job.attack, job.dodge)
+        return cls(name, job, job.health, job.mana,
+                   equipment={slot: None for slot in job.slots})
+
+    def _bonus(self, stat):
+        return sum(getattr(item, stat) for item in self.equipment.values() if item)
+
+    @property
+    def attack(self):
+        return self.job.attack + self._bonus('attack')
+
+    @property
+    def max_health(self):
+        return self.job.health + self._bonus('max_health')
+
+    @property
+    def spell_power(self):
+        return self.job.special_power + self._bonus('spell_power')
+
+    @property
+    def max_mana(self):
+        return self.job.mana + self._bonus('mana')
+
+    @property
+    def dodge(self):
+        return self.job.dodge
 
     @property
     def alive(self):
@@ -70,57 +162,80 @@ def print_job_stats(job):
     print(f'     Health: {job.health}')
     print(f'     Attack: {job.attack}')
     print(f'      Dodge: {job.dodge}')
+    if job.mana:
+        print(f'       Mana: {job.mana}')
     if job.special:
         print(f'Special ATK: {job.special}')
+    print(f'       Gear: {" & ".join(job.slots)}')
 
 
-# --- Items and loot -------------------------------------------------------
-
-@dataclass(frozen=True)
-class Item:
-    name: str
-    attack: int = 0
-    health: int = 0
+def print_status(character, monster):
+    print(f'Hero Current HP: {character.health}/{character.max_health}')
+    if character.max_mana:
+        print(f'           Mana: {character.mana}/{character.max_mana}')
+    print(f'       Enemy HP: {monster.health}')
 
 
-ITEMS = {
-    'fine_sword': Item('Fine Sword', attack=5),
-    'firebrand': Item('Firebrand Sword', attack=10),
-    'mithril_blade': Item('Mithril Blade', attack=15),
-    'fine_shield': Item('Fine Shield', health=25),
-    'thick_shield': Item('Thick Kite Shield', health=50),
-    'mithril_buckler': Item('Mithril Buckler', health=75),
-}
+# --- Equipment ------------------------------------------------------------
 
-# Rolled on a d10; None means the camp is empty.
-COMMON_LOOT = (
-    (2, ITEMS['fine_sword']),
-    (2, ITEMS['fine_shield']),
-    (1, ITEMS['firebrand']),
-    (1, ITEMS['thick_shield']),
-    (4, None),
-)
+def choose_slot(character, item, ask=input):
+    """Return the slot to put the item in, or None to leave it behind."""
+    slots = [slot for slot, kind in character.job.slots.items() if kind == item.kind]
+    for slot in slots:
+        if character.equipment[slot] is None:
+            return slot
+    if not slots:
+        return None
 
-# Rolled on a d20; tougher kobolds always carry something.
-RARE_LOOT = (
-    (2, ITEMS['fine_sword']),
-    (3, ITEMS['fine_shield']),
-    (8, ITEMS['firebrand']),
-    (5, ITEMS['thick_shield']),
-    (1, ITEMS['mithril_blade']),
-    (1, ITEMS['mithril_buckler']),
-)
+    for slot in slots:
+        current = character.equipment[slot]
+        print(f'{slot:>11}: [{current.name}] ({current.describe()})')
+    options = {slot.lower(): slot for slot in slots}
+    menu = f'[{" / ".join(slots)} / Keep] '
+    while True:
+        answer = ask(f'Replace which? {menu}').strip().lower()
+        if answer == 'keep':
+            return None
+        if answer in options:
+            return options[answer]
+        print('Please select a valid option.')
 
 
-def search_camp(character, monster, rng=random):
-    item = roll_on_table(monster.loot, rng)
+def equip(character, slot, item):
+    """Put an item in a slot. Bigger max HP or mana also tops you up by
+    the difference; smaller only trims you down to the new max."""
+    old_max_health, old_max_mana = character.max_health, character.max_mana
+    character.equipment[slot] = item
+    character.health = min(character.health + max(0, character.max_health - old_max_health),
+                           character.max_health)
+    character.mana = min(character.mana + max(0, character.max_mana - old_max_mana),
+                         character.max_mana)
+
+
+def search_camp(character, monster, rng=random, ask=input):
+    item = roll_on_table(character.job.loot[monster.loot_tier], rng)
     if item is None:
         print('You search the kobolds camp but find nothing of worth. '
               'You take your frustration out on the kobolds corpse.')
         return
-    character.attack += item.attack
-    character.health += item.health
-    print(f'You search the kobolds camp and find a [{item.name}].')
+    print(f'You search the kobolds camp and find a [{item.name}] ({item.describe()}).')
+    slot = choose_slot(character, item, ask)
+    if slot is None:
+        print(f'You leave the [{item.name}] behind.')
+        return
+    equip(character, slot, item)
+    print(f'You equip the [{item.name}].')
+
+
+def rest(character):
+    healed = min(round(character.max_health * REST_HEAL),
+                 character.max_health - character.health)
+    character.health += healed
+    message = f'You catch your breath and recover {healed} HP.'
+    if character.mana < character.max_mana:
+        character.mana = character.max_mana
+        message += ' Your magic returns to you.'
+    print(message)
 
 
 # --- Monsters -------------------------------------------------------------
@@ -130,14 +245,15 @@ class Monster:
     name: str
     health: int
     attack: int
-    loot: tuple
+    loot_tier: str = 'common'
+    boss: bool = False
 
 
 BESTIARY = {
-    'kobold_miner': Monster('Kobold Miner', health=35, attack=10, loot=COMMON_LOOT),
-    'kobold_guard': Monster('Kobold Guardsman', health=50, attack=15, loot=COMMON_LOOT),
-    'kobold_heavy': Monster('Kobold Heavy', health=75, attack=20, loot=RARE_LOOT),
-    'kobold_leader': Monster('Kobold Leader', health=100, attack=25, loot=RARE_LOOT),
+    'kobold_miner': Monster('Kobold Miner', health=35, attack=10),
+    'kobold_guard': Monster('Kobold Guardsman', health=55, attack=18),
+    'kobold_heavy': Monster('Kobold Heavy', health=90, attack=25, loot_tier='rare'),
+    'kobold_leader': Monster('Kobold Leader', health=200, attack=30, boss=True),
 }
 
 
@@ -146,11 +262,11 @@ def spawn(monster_key):
     return replace(BESTIARY[monster_key])
 
 
-# The deeper you go (higher creep score), the nastier the kobolds.
+# The deeper you go (higher creep score), the nastier the kobolds. The
+# Kobold Leader waits at the bottom, see BOSS_CS.
 SHALLOW_ENCOUNTERS = ((2, 'kobold_guard'), (8, 'kobold_miner'))
 MIDDLE_ENCOUNTERS = ((3, 'kobold_miner'), (5, 'kobold_guard'), (2, 'kobold_heavy'))
-DEEP_ENCOUNTERS = ((5, 'kobold_miner'), (10, 'kobold_guard'),
-                   (4, 'kobold_heavy'), (1, 'kobold_leader'))
+DEEP_ENCOUNTERS = ((5, 'kobold_miner'), (10, 'kobold_guard'), (5, 'kobold_heavy'))
 
 
 def encounter_table(cs):
@@ -206,13 +322,14 @@ def flee(character, monster, rng):
 
 
 def cast_fireball(character, monster, rng):
+    character.mana -= 1
     roll = rng.randint(1, 10)
     debug(f'Misfire Roll: {roll}')
-    power = character.job.special_power
-    if roll <= 3:
+    power = character.spell_power
+    if roll <= 2:
         character.health -= power // 2
         print('CRITICAL FAIL: Fireball Misfire')
-    elif roll <= 5:
+    elif roll <= 4:
         print('Your fireball passes harmlessly over the kobolds head.')
         print(f'You are struck for {monster_hits(character, monster, rng)} damage.')
     else:
@@ -221,6 +338,7 @@ def cast_fireball(character, monster, rng):
 
 
 def fight(character, monster, rng=random, ask=input):
+    """Returns True if the monster was slain, False if you fled or died."""
     options = ['Attack', 'Defend']
     if character.job.special:
         options.append(character.job.special)
@@ -236,23 +354,21 @@ def fight(character, monster, rng=random, ask=input):
         elif action == 'defend':
             defend(character, monster, rng)
         elif action == 'flee' and character.job.special == 'Flee':
+            if monster.boss:
+                print(f'There is no escaping the {monster.name}.')
+                continue
             if flee(character, monster, rng):
-                return
+                return False
         elif action == 'cast: fireball' and character.job.special == 'Cast: Fireball':
+            if character.mana < 1:
+                print('You reach for your magic and find nothing left. You are out of mana.')
+                continue
             cast_fireball(character, monster, rng)
         else:
             print('Please select a valid action.')
             continue
-        print(f'Hero Current HP: {character.health}')
-        print(f'       Enemy HP: {monster.health}')
-
-    if not character.alive:
-        return
-    character.cs += 1
-    print('Your enemy has fallen. You may move on.')
-    print(f'Creep Score: {character.cs}')
-    search_camp(character, monster, rng)
-    print('-----------------------------------------------------')
+        print_status(character, monster)
+    return character.alive
 
 
 # --- Game flow ------------------------------------------------------------
@@ -266,11 +382,37 @@ def choose_job(ask=input):
         print('Please select a class exactly as it appears idiot.')
 
 
-def explore(character, rng=random, ask=input):
-    while character.alive:
-        monster_key = roll_on_table(encounter_table(character.cs), rng)
-        fight(character, spawn(monster_key), rng, ask)
+def game_over(character):
     print('You have fallen during the encounter. GAME OVER')
+    print(f'Kobolds slain: {character.cs}')
+
+
+def explore(character, rng=random, ask=input):
+    """Play until you die or beat the Kobold Leader. Returns True on a win."""
+    while character.alive and character.cs < BOSS_CS:
+        monster = spawn(roll_on_table(encounter_table(character.cs), rng))
+        if fight(character, monster, rng, ask):
+            character.cs += 1
+            print('Your enemy has fallen. You may move on.')
+            print(f'Creep Score: {character.cs}')
+            search_camp(character, monster, rng, ask)
+            rest(character)
+            print('-----------------------------------------------------')
+    if not character.alive:
+        game_over(character)
+        return False
+
+    print('')
+    print('The tunnel opens into a torch-lit chamber. Atop a throne of stolen junk '
+          'sits the Kobold Leader, who does not look happy to see you.')
+    if not fight(character, spawn('kobold_leader'), rng, ask):
+        game_over(character)
+        return False
+    print('')
+    print('The Kobold Leader collapses onto his pile of junk. The mines fall silent.')
+    print(f'Well I never. {character.name} the {character.job.name} actually made it out. '
+          'I had money on you not making it past the first miner.')
+    return True
 
 
 def main():
