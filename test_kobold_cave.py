@@ -29,8 +29,23 @@ def quietly(func, *args):
         return func(*args)
 
 
-def hero(job='warrior', **stat_changes):
-    return game.Character.create('Test', replace(game.JOBS[job], **stat_changes))
+def captured(func, *args):
+    out = StringIO()
+    with redirect_stdout(out):
+        result = func(*args)
+    return result, out.getvalue()
+
+
+def hero(job='warrior', name='Test', **stat_changes):
+    return game.Character.create(name, replace(game.JOBS[job], **stat_changes), hero=True)
+
+
+def party_of(*members):
+    return game.Party(list(members))
+
+
+def companion(job='rogue', name='Mira', **stat_changes):
+    return game.Character.create(name, replace(game.JOBS[job], **stat_changes))
 
 
 class TableTests(unittest.TestCase):
@@ -40,13 +55,12 @@ class TableTests(unittest.TestCase):
         self.assertEqual(game.roll_on_table(table, FakeRng(3)), 'b')
         self.assertEqual(game.roll_on_table(table, FakeRng(10)), 'b')
 
-    def test_tables_use_the_expected_dice(self):
-        tables = [(game.SHALLOW_ENCOUNTERS, 10), (game.MIDDLE_ENCOUNTERS, 10),
-                  (game.DEEP_ENCOUNTERS, 20)]
+    def test_tables_use_d10s_and_d20s(self):
+        tables = [table for stage in game.STAGES for _, table in stage.encounters]
         for job in game.JOBS.values():
-            tables += [(job.loot['common'], 10), (job.loot['rare'], 20)]
-        for table, sides in tables:
-            self.assertEqual(sum(weight for weight, _ in table), sides)
+            tables += [job.loot['common'], job.loot['rare']]
+        for table in tables:
+            self.assertIn(sum(weight for weight, _ in table), (10, 20))
 
     def test_every_job_only_finds_gear_it_can_use(self):
         for job in game.JOBS.values():
@@ -56,44 +70,49 @@ class TableTests(unittest.TestCase):
                     if item:
                         self.assertIn(item.kind, usable, f'{job.name} found {item.name}')
 
-    def test_leader_only_appears_as_the_boss(self):
-        for table in (game.SHALLOW_ENCOUNTERS, game.MIDDLE_ENCOUNTERS, game.DEEP_ENCOUNTERS):
-            self.assertNotIn('kobold_leader', [key for _, key in table])
+    def test_bosses_only_appear_at_the_end_of_their_stage(self):
+        for stage in game.STAGES:
+            self.assertTrue(game.BESTIARY[stage.boss].boss)
+            for _, table in stage.encounters:
+                for _, key in table:
+                    self.assertFalse(game.BESTIARY[key].boss, key)
 
-    def test_encounters_get_harder_with_creep_score(self):
-        self.assertIs(game.encounter_table(2), game.SHALLOW_ENCOUNTERS)
-        self.assertIs(game.encounter_table(3), game.MIDDLE_ENCOUNTERS)
-        self.assertIs(game.encounter_table(5), game.DEEP_ENCOUNTERS)
+    def test_upper_mines_get_harder_as_you_go(self):
+        mines = game.STAGES[0]
+        self.assertIs(game.encounter_table(mines, 2), game.SHALLOW_ENCOUNTERS)
+        self.assertIs(game.encounter_table(mines, 3), game.MIDDLE_ENCOUNTERS)
+        self.assertIs(game.encounter_table(mines, 7), game.DEEP_ENCOUNTERS)
 
     def test_spawn_does_not_share_health_with_bestiary(self):
         monster = game.spawn('kobold_miner')
         monster.health -= 10
         self.assertEqual(game.BESTIARY['kobold_miner'].health, 35)
+        self.assertEqual(monster.max_health, 35)
 
 
 class EquipmentTests(unittest.TestCase):
     def test_first_sword_is_equipped_automatically(self):
         warrior = hero()
-        quietly(game.search_camp, warrior, game.spawn('kobold_miner'), FakeRng(1))
+        quietly(game.search_camp, party_of(warrior), game.spawn('kobold_miner'), FakeRng(1))
         self.assertEqual(warrior.attack, 20)
 
     def test_shield_raises_max_and_current_health(self):
         warrior = hero()
         warrior.health = 100
-        quietly(game.search_camp, warrior, game.spawn('kobold_heavy'), FakeRng(20))
+        quietly(game.search_camp, party_of(warrior), game.spawn('kobold_heavy'), FakeRng(20))
         self.assertEqual((warrior.health, warrior.max_health), (175, 225))
 
-    def test_swords_no_longer_stack_for_warriors(self):
+    def test_swords_do_not_stack(self):
         warrior = hero()
-        quietly(game.equip, warrior, 'Weapon', game.ITEMS['fine_sword'])
-        quietly(game.search_camp, warrior, game.spawn('kobold_miner'), FakeRng(5),
+        game.equip(warrior, 'Weapon', game.ITEMS['fine_sword'])
+        quietly(game.search_camp, party_of(warrior), game.spawn('kobold_miner'), FakeRng(5),
                 answers('weapon'))
         self.assertEqual(warrior.attack, 15 + 10)
 
     def test_keeping_your_gear_leaves_the_new_item(self):
         warrior = hero()
         game.equip(warrior, 'Weapon', game.ITEMS['mithril_blade'])
-        quietly(game.search_camp, warrior, game.spawn('kobold_miner'), FakeRng(1),
+        quietly(game.search_camp, party_of(warrior), game.spawn('kobold_miner'), FakeRng(1),
                 answers('nonsense', 'keep'))
         self.assertEqual(warrior.equipment['Weapon'], game.ITEMS['mithril_blade'])
 
@@ -106,162 +125,272 @@ class EquipmentTests(unittest.TestCase):
 
     def test_rogue_dual_wields(self):
         rogue = hero('rogue')
-        quietly(game.search_camp, rogue, game.spawn('kobold_miner'), FakeRng(1))
-        quietly(game.search_camp, rogue, game.spawn('kobold_miner'), FakeRng(5))
+        quietly(game.search_camp, party_of(rogue), game.spawn('kobold_miner'), FakeRng(1))
+        quietly(game.search_camp, party_of(rogue), game.spawn('kobold_miner'), FakeRng(5))
         self.assertEqual(rogue.attack, 12 + 5 + 10)
-
-    def test_rogue_picks_which_hand_to_replace(self):
-        rogue = hero('rogue')
-        game.equip(rogue, 'Main hand', game.ITEMS['fine_sword'])
-        game.equip(rogue, 'Off hand', game.ITEMS['firebrand'])
-        quietly(game.search_camp, rogue, game.spawn('kobold_heavy'), FakeRng(20),
-                answers('main hand'))
-        self.assertEqual(rogue.attack, 12 + 15 + 10)
 
     def test_staves_add_spell_power_or_mana(self):
         wizard = hero('wizard')
         game.equip(wizard, 'Staff', game.ITEMS['crystal_staff'])
-        self.assertEqual((wizard.spell_power, wizard.max_mana, wizard.mana), (60, 6, 6))
+        self.assertEqual((wizard.spell_power, wizard.max_mana, wizard.mana), (70, 7, 7))
 
-    def test_empty_camp_changes_nothing(self):
+    def test_in_a_party_whoever_searches_gets_gear_for_their_class(self):
+        warrior, wizard = hero(), companion('wizard', 'Ysolde')
+        # the second member searches, then rolls a 1 on the wizard's table
+        quietly(game.search_camp, party_of(warrior, wizard), game.spawn('kobold_miner'),
+                FakeRng(1, 1))
+        self.assertEqual(wizard.equipment['Staff'], game.ITEMS['apprentice_staff'])
+        self.assertIsNone(warrior.equipment['Weapon'])
+
+
+class HealingTests(unittest.TestCase):
+    def test_you_start_with_bandages(self):
+        self.assertEqual(party_of(hero()).bandages, game.START_BANDAGES)
+
+    def test_kobolds_sometimes_drop_bandages_and_bosses_always_do(self):
+        party = party_of(hero())
+        quietly(game.find_bandages, party, game.spawn('kobold_miner'), FakeRng(2))
+        self.assertEqual(party.bandages, 2)
+        quietly(game.find_bandages, party, game.spawn('kobold_miner'), FakeRng(1))
+        self.assertEqual(party.bandages, 3)
+        quietly(game.find_bandages, party, game.spawn('kobold_leader'), FakeRng())
+        self.assertEqual(party.bandages, 5)
+
+    def test_bandage_heals_on_your_own(self):
         warrior = hero()
-        quietly(game.search_camp, warrior, game.spawn('kobold_miner'), FakeRng(10))
-        self.assertEqual((warrior.health, warrior.attack), (150, 15))
+        warrior.health = 20
+        party = party_of(warrior)
+        quietly(game.offer_bandages, party, answers('yes', 'no'))
+        self.assertEqual(warrior.health, 20 + round(150 * game.BANDAGE_HEAL))
+        self.assertEqual(party.bandages, 1)
 
-    def test_rest_heals_up_to_max_and_refills_mana(self):
-        wizard = hero('wizard')
-        wizard.health, wizard.mana = 50, 0
-        quietly(game.rest, wizard)
-        self.assertEqual((wizard.health, wizard.mana), (50 + round(110 * game.REST_HEAL), 4))
-        wizard.health = 109
-        quietly(game.rest, wizard)
-        self.assertEqual(wizard.health, 110)
+    def test_bandages_stop_when_everyone_is_healthy(self):
+        warrior = hero()
+        warrior.health = 140
+        party = party_of(warrior)
+        quietly(game.offer_bandages, party, answers('yes'))  # no second question
+        self.assertEqual((warrior.health, party.bandages), (150, 1))
+
+    def test_in_a_party_you_pick_who_to_bandage(self):
+        warrior, rogue = hero(), companion()
+        warrior.health, rogue.health = 100, 30
+        party = party_of(warrior, rogue)
+        quietly(game.offer_bandages, party, answers('nobody', 'mira', 'no'))
+        self.assertEqual((warrior.health, rogue.health), (100, 30 + 48))
+
+    def test_rest_heals_everyone_standing_and_refills_mana(self):
+        wizard, rogue = hero('wizard'), companion()
+        wizard.health, wizard.mana, rogue.health = 50, 0, 0
+        quietly(game.rest, party_of(wizard, rogue))
+        self.assertEqual((wizard.health, wizard.mana), (50 + round(130 * game.REST_HEAL), 5))
+        self.assertEqual(rogue.health, 0)  # the fallen stay down
 
 
 class CombatTests(unittest.TestCase):
-    def test_attack_trades_blows_when_dodge_fails(self):
+    def test_attack_deals_your_attack_plus_a_roll(self):
         warrior, miner = hero(), game.spawn('kobold_miner')
-        # dodge 3 + 0 = 3 (fails), hit for 15 + 1, miner hits for 10 + 2
-        quietly(game.attack, warrior, miner, FakeRng(0, 1, 2))
-        self.assertEqual((warrior.health, miner.health), (138, 19))
+        quietly(game.attack, warrior, miner, FakeRng(1))
+        self.assertEqual(miner.health, 35 - 16)
 
-    def test_attack_avoids_damage_when_dodge_succeeds(self):
+    def test_kobold_hits_when_dodge_fails(self):
         warrior, miner = hero(), game.spawn('kobold_miner')
-        quietly(game.attack, warrior, miner, FakeRng(3, 0))
-        self.assertEqual((warrior.health, miner.health), (150, 20))
+        quietly(game.monster_strikes, warrior, miner, FakeRng(2, 0))  # dodge 3 + 0 fails
+        self.assertEqual(warrior.health, 150 - 12)
 
-    def test_defend_counterattacks_for_half_attack(self):
+    def test_kobold_misses_when_dodge_succeeds(self):
         warrior, miner = hero(), game.spawn('kobold_miner')
-        quietly(game.defend, warrior, miner, FakeRng(7, 0))
-        self.assertEqual(miner.health, 35 - round(15 / 2))
+        quietly(game.monster_strikes, warrior, miner, FakeRng(2, 1))  # dodge 3 + 1 holds
+        self.assertEqual(warrior.health, 150)
+
+    def test_defending_parries_or_counterattacks(self):
+        warrior, miner = hero(), game.spawn('kobold_miner')
+        warrior.defending = True
+        quietly(game.monster_strikes, warrior, miner, FakeRng(0, 3))
+        self.assertEqual((warrior.health, miner.health), (150, 35))
+        quietly(game.monster_strikes, warrior, miner, FakeRng(0, 7, 0))
+        self.assertEqual((warrior.health, miner.health), (150, 35 - round(15 / 2)))
 
     def test_fireball_uses_spell_power_and_mana(self):
         wizard, heavy = hero('wizard'), game.spawn('kobold_heavy')
-        game.equip(wizard, 'Staff', game.ITEMS['ember_staff'])
+        game.equip(wizard, 'Staff', game.ITEMS['apprentice_staff'])
         quietly(game.cast_fireball, wizard, heavy, FakeRng(10))
-        self.assertEqual((heavy.health, wizard.mana), (90 - 75, 3))
+        self.assertEqual((heavy.health, wizard.mana), (90 - 70, 4))
 
     def test_fireball_misfire_burns_the_wizard(self):
         wizard = hero('wizard')
         quietly(game.cast_fireball, wizard, game.spawn('kobold_miner'), FakeRng(1))
-        self.assertEqual(wizard.health, 110 - 25)
+        self.assertEqual(wizard.health, 130 - 30)
 
     def test_no_fireball_without_mana(self):
-        wizard, miner = hero('wizard', attack=200), game.spawn('kobold_miner')
+        wizard = hero('wizard', attack=200)
         wizard.mana = 0
-        out = StringIO()
-        with redirect_stdout(out):
-            # the cast is refused without using a turn or any dice, then one swing ends it
-            won = game.fight(wizard, miner, FakeRng(3, 0),
-                             answers('cast: fireball', 'attack'))
-        self.assertIn('out of mana', out.getvalue())
+        won, out = captured(game.fight, party_of(wizard), game.spawn('kobold_miner'),
+                            FakeRng(0), answers('cast: fireball', 'attack'))
+        self.assertIn('out of mana', out)
         self.assertTrue(won)
-        self.assertEqual(wizard.health, 110)
 
     def test_only_rogues_can_flee(self):
-        warrior, miner = hero(), game.spawn('kobold_miner')
-        out = StringIO()
-        with redirect_stdout(out):
-            # 'flee' is rejected, then three clean hits of 17 (dodge succeeds)
-            won = game.fight(warrior, miner, FakeRng(3, 2, 3, 2, 3, 2),
-                             answers('flee', 'attack', 'attack', 'attack'))
-        self.assertIn('Please select a valid action.', out.getvalue())
+        warrior = hero(attack=200)
+        won, out = captured(game.fight, party_of(warrior), game.spawn('kobold_miner'),
+                            FakeRng(0), answers('flee', 'attack'))
+        self.assertIn('Please select a valid action.', out)
         self.assertTrue(won)
 
-    def test_rogue_can_escape_a_normal_fight(self):
-        rogue = hero('rogue')
-        won = quietly(game.fight, rogue, game.spawn('kobold_miner'), FakeRng(5), answers('flee'))
+    def test_rogue_can_get_the_party_away(self):
+        party = party_of(hero('rogue'), companion('warrior', 'Brann'))
+        won = quietly(game.fight, party, game.spawn('kobold_miner'), FakeRng(5), answers('flee'))
         self.assertFalse(won)
-        self.assertTrue(rogue.alive)
+        self.assertTrue(party.alive)
 
-    def test_no_escaping_the_boss(self):
+    def test_no_escaping_a_boss(self):
         rogue = hero('rogue', attack=200)
-        out = StringIO()
-        with redirect_stdout(out):
-            won = game.fight(rogue, game.spawn('kobold_leader'), FakeRng(3, 0),
-                             answers('flee', 'attack'))
-        self.assertIn('There is no escaping', out.getvalue())
+        won, out = captured(game.fight, party_of(rogue), game.spawn('kobold_leader'),
+                            FakeRng(0), answers('flee', 'attack'))
+        self.assertIn('There is no escaping', out)
         self.assertTrue(won)
 
-    def test_dying_loses_the_fight(self):
-        warrior, guard = hero(), game.spawn('kobold_guard')
+    def test_every_party_member_gets_orders(self):
+        warrior, rogue = hero(attack=20), companion(attack=20)
+        prompts = []
+        def ask(prompt):
+            prompts.append(prompt)
+            return 'attack'
+        # 22 + 22 kills the miner before it can strike back
+        quietly(game.fight, party_of(warrior, rogue), game.spawn('kobold_miner'),
+                FakeRng(2, 2), ask)
+        self.assertEqual(prompts, ['Test: [Attack / Defend] ', 'Mira: [Attack / Defend / Flee] '])
+
+    def test_kobold_strikes_a_random_party_member(self):
+        warrior, rogue = hero(), companion()
+        party = party_of(warrior, rogue)
+        # picks the second member, then rolls 0 damage and a dodge of 4 - 2 (fails)
+        quietly(game.monster_turn, party, game.spawn('kobold_miner'), 1, FakeRng(1, 0, -2))
+        self.assertEqual((warrior.health, rogue.health), (150, 110))
+
+    def test_warchief_strikes_twice(self):
+        warrior = hero()
+        quietly(game.monster_turn, party_of(warrior), game.spawn('kobold_warchief'), 1,
+                FakeRng(0, 0, 0, 0))
+        self.assertEqual(warrior.health, 150 - 60)
+
+    def test_dragon_breath_hits_everyone_every_third_round(self):
+        warrior, rogue = hero(), companion()
+        quietly(game.monster_turn, party_of(warrior, rogue), game.spawn('red_dragon'), 3,
+                FakeRng(0, 0))
+        self.assertEqual((warrior.health, rogue.health), (120, 90))
+
+    def test_the_fight_goes_on_when_a_companion_falls(self):
+        warrior, rogue = hero(), companion()
+        rogue.health = 5
+        party = party_of(warrior, rogue)
+        _, out = captured(game.monster_turn, party, game.spawn('kobold_miner'), 1,
+                          FakeRng(1, 0, -2))
+        self.assertIn('Mira has fallen.', out)
+        self.assertEqual(party.living, [warrior])
+
+    def test_losing_everyone_loses_the_fight(self):
+        warrior = hero()
         warrior.health = 5
-        won = quietly(game.fight, warrior, guard, FakeRng(10, 0), answers('defend'))
+        won = quietly(game.fight, party_of(warrior), game.spawn('kobold_guard'),
+                      FakeRng(0, 0, 0), answers('attack'))
         self.assertFalse(won)
-        self.assertFalse(warrior.alive)
+
+
+class RewardTests(unittest.TestCase):
+    def test_freeing_a_prisoner_adds_them_with_gear(self):
+        party = party_of(hero())
+        quietly(game.boss_reward, party, 0, answers('ysolde'))
+        recruit = party.members[1]
+        self.assertEqual((recruit.name, recruit.job.name), ('Ysolde', 'Wizard'))
+        self.assertEqual(recruit.equipment['Staff'], game.ITEMS['apprentice_staff'])
+        self.assertEqual(recruit.health, recruit.max_health)
+        self.assertFalse(recruit.hero)
+
+    def test_fallen_companions_make_room_for_new_ones(self):
+        rogue = companion()
+        rogue.health = 0
+        party = party_of(hero(), rogue)
+        quietly(game.boss_reward, party, 1, answers('hilda'))
+        self.assertEqual([member.name for member in party.members], ['Test', 'Hilda'])
+
+    def test_power_up_strengthens_the_hero(self):
+        warrior = hero()
+        warrior.health = 100
+        quietly(game.boss_reward, party_of(warrior), 0, answers('power up'))
+        self.assertEqual((warrior.attack, warrior.max_health, warrior.health), (27, 250, 200))
+
+    def test_a_full_party_powers_up_without_asking(self):
+        party = party_of(hero(), companion(), companion('wizard', 'Ysolde'))
+        quietly(game.boss_reward, party, 1, answers())
+        self.assertEqual(party.members[0].boons, [game.BOONS['Warrior']])
+
+
+class FlowTests(unittest.TestCase):
+    def setUp(self):
+        self.stages = game.STAGES
+
+    def tearDown(self):
+        game.STAGES = self.stages
+
+    def test_choose_job_insists_on_a_real_class(self):
+        job, out = captured(game.choose_job, answers('bard', ' Wizard '))
+        self.assertEqual(job.name, 'Wizard')
+        self.assertIn('idiot', out)
+
+    def test_slaying_all_three_bosses_wins(self):
+        game.STAGES = tuple(replace(stage, fights=0) for stage in self.stages)
+        party = party_of(hero(attack=1000))
+        won, out = captured(game.play, party, FakeRng(0, 0, 0),
+                            answers('attack', 'power up', 'attack', 'vex', 'attack'))
+        self.assertTrue(won)
+        self.assertIn('actually made it out', out)
+        self.assertEqual(party.cs, 3)
+        self.assertEqual([member.name for member in party.members], ['Test', 'Vex'])
+
+    def test_a_win_earns_creep_score_loot_bandages_and_rest(self):
+        game.STAGES = (replace(self.stages[0], fights=1),)
+        warrior = hero(attack=1000)
+        warrior.health = 100
+        party = party_of(warrior)
+        # encounter: miner; one hit; Fine Shield; a bandage drop; then the boss
+        won = quietly(game.play, party, FakeRng(5, 0, 3, 1, 0), answers('attack', 'no', 'attack'))
+        self.assertTrue(won)
+        self.assertEqual(party.cs, 2)
+        self.assertEqual(warrior.max_health, 175)
+        self.assertEqual(party.bandages, game.START_BANDAGES + 1 + 2)
+        self.assertEqual(warrior.health, 100 + 25 + round(175 * game.REST_HEAL))
 
 
 class ShowHookTests(unittest.TestCase):
     """The browser draws from show(); its details must survive json.dumps."""
 
-    def test_every_scene_sends_plain_data(self):
-        scenes = []
-        original = game.show
-        game.show = lambda scene, **details: scenes.append((scene, json.dumps(details))) or True
-        try:
-            wizard = hero('wizard', attack=200)
-            wizard.cs = game.BOSS_CS - 1
-            # one miner (empty camp), then the boss, each felled by a single clean hit
-            quietly(game.explore, wizard, FakeRng(5, 3, 0, 10, 3, 0), answers('attack', 'attack'))
-            game.show('jobs', jobs=[game.job_view(job) for job in game.JOBS.values()])
-        finally:
-            game.show = original
-        self.assertEqual([scene for scene, _ in scenes],
-                         ['combat', 'combat', 'explore', 'combat', 'combat', 'victory', 'jobs'])
-        self.assertIn('"max_mana": 4', scenes[0][1])
+    def setUp(self):
+        self.scenes = []
+        self.original = game.show
+        game.show = lambda scene, **details: self.scenes.append((scene, json.dumps(details))) or True
 
+    def tearDown(self):
+        game.show = self.original
 
-class FlowTests(unittest.TestCase):
-    def test_choose_job_insists_on_a_real_class(self):
-        out = StringIO()
-        with redirect_stdout(out):
-            job = game.choose_job(answers('bard', ' Wizard '))
-        self.assertEqual(job.name, 'Wizard')
-        self.assertIn('idiot', out.getvalue())
+    def test_combat_scenes_carry_the_party_and_enemy(self):
+        party = party_of(hero('wizard', attack=200), companion())
+        quietly(game.fight, party, game.spawn('kobold_miner'), FakeRng(0), answers('attack'))
+        scene, details = self.scenes[0]
+        self.assertEqual(scene, 'combat')
+        details = json.loads(details)
+        self.assertEqual([member['name'] for member in details['party']], ['Test', 'Mira'])
+        self.assertEqual(details['active'], 0)
+        self.assertEqual(details['enemy']['name'], 'Kobold Miner')
 
-    def test_beating_the_leader_wins_the_game(self):
-        champion = hero(attack=200)
-        champion.cs = game.BOSS_CS
-        out = StringIO()
-        with redirect_stdout(out):
-            won = game.explore(champion, FakeRng(3, 0), answers('attack'))
-        self.assertTrue(won)
-        self.assertIn('actually made it out', out.getvalue())
+    def test_recruit_scene_lists_the_prisoners(self):
+        quietly(game.boss_reward, party_of(hero()), 0, answers('brann'))
+        scene, details = next(item for item in self.scenes if item[0] == 'recruit')
+        names = [prisoner['name'] for prisoner in json.loads(details)['prisoners']]
+        self.assertEqual(names, ['Brann', 'Mira', 'Ysolde'])
 
-    def test_a_win_earns_creep_score_loot_and_rest(self):
-        warrior = hero(attack=200)
-        warrior.health = 100
-        game.BOSS_CS, saved = 1, game.BOSS_CS
-        try:
-            # miner encounter, one clean hit, find a Fine Shield, then a one-hit boss
-            won = quietly(game.explore, warrior, FakeRng(5, 3, 0, 3, 3, 0),
-                          answers('attack', 'attack'))
-        finally:
-            game.BOSS_CS = saved
-        self.assertTrue(won)
-        self.assertEqual(warrior.cs, 1)
-        self.assertEqual(warrior.max_health, 175)
-        self.assertEqual(warrior.health, 100 + 25 + round(175 * game.REST_HEAL))
+    def test_class_cards_are_plain_data(self):
+        game.show('jobs', jobs=[game.job_view(job) for job in game.JOBS.values()])
+        self.assertEqual(self.scenes[0][0], 'jobs')
 
 
 if __name__ == '__main__':

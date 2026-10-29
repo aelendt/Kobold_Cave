@@ -162,6 +162,15 @@ form { display: flex; gap: 0.5rem; }
 .fighter { margin: 0; display: flex; gap: 0.75rem; align-items: center; min-width: 0; }
 .enemy .fighter { flex-direction: row-reverse; text-align: right; }
 .fighter figcaption { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.25rem; }
+.fighter.active .portrait { box-shadow: inset 0 0 0 2px var(--lantern), 0 0 12px rgba(240, 167, 60, 0.35); }
+.fighter.active .who { color: var(--lantern); }
+.fighter.big .portrait { width: 6.5rem; height: 6.5rem; }
+.party.size-2 .portrait, .party.size-3 .portrait { width: 3.5rem; height: 3.5rem; padding: 0.25rem; }
+.party.size-3 { gap: 0.4rem; }
+.party.size-3 .what { display: none; }
+.supplies { font-size: 0.75rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--dust-dim); }
+.jobs.recruits { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+button.job.boon { border-color: rgba(243, 195, 79, 0.45); }
 .who { font-weight: 700; color: var(--dust); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .what { font-size: 0.8rem; color: var(--dust-dim); }
 .badge {
@@ -236,6 +245,11 @@ button.job:hover .who { color: var(--lantern); }
   .arena { gap: 0.6rem; }
   button.job { padding: 0.5rem; }
   button.job .portrait { width: 3.5rem; height: 3.5rem; }
+  .jobs.recruits { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .enemy .what { display: none; }
+  .nums { min-width: 0; }
+  .fighter.big .portrait { width: 5rem; height: 5rem; }
+  .party.size-2 .portrait, .party.size-3 .portrait { width: 3rem; height: 3rem; }
   .stat-row { grid-template-columns: 1fr; gap: 0.1rem; }
   .stat-row .nums { display: none; }
 }
@@ -299,9 +313,9 @@ function classify(line) {
   if (/^-{10,}$/.test(line)) return 'divider';
   if (/GAME OVER|Kobolds slain/.test(line)) return 'death';
   if (/actually made it out|collapses onto his pile/.test(line)) return 'victory';
-  if (/^You have encountered/.test(line)) return 'encounter';
+  if (/^You have encountered|blocks your path\. What will you do/.test(line)) return 'encounter';
   if (/You are struck|CRITICAL FAIL|blow to the head/.test(line)) return 'hurt';
-  if (/^\s*(Hero Current HP|Enemy HP):|^\s*Mana: \d+\/\d+/.test(line)) return 'panel';  // drawn in the panel instead
+  if (/^\s*([\w' ]+ HP|Mana): -?\d+(\/\d+)?$/.test(line)) return 'panel';  // drawn in the panel instead
   if (/^Creep Score:/.test(line)) return 'stat';
   return '';
 }
@@ -314,8 +328,6 @@ function addLine(text, cls = classify(text)) {
   p.innerHTML = escapeHtml(text).replace(/\[([^\]/]+)\]/g, '<span class="loot">[$1]</span>');
   log.append(p);
   log.scrollTop = log.scrollHeight;
-  const cs = text.match(/^Creep Score: (\d+)/);
-  if (cs) statusLabel.textContent = `Kobolds slain: ${cs[1]}`;
 }
 
 // Python's print() arrives here byte by byte; split it into lines.
@@ -334,7 +346,9 @@ function writeStdout(bytes) {
 let resolveAnswer = null;
 // Called from kobold_cave.show() to update the picture panel.
 window.drawScene = function (scene, json) {
-  showScene(scene, JSON.parse(json), { pick: submit });
+  const details = JSON.parse(json);
+  showScene(scene, details, { pick: submit });
+  if (details.stage) statusLabel.textContent = `${details.stage} · Slain: ${details.cs}`;
 };
 
 window.askPlayer = function (prompt) {

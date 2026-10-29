@@ -2,21 +2,31 @@
 
 This is my humble attempt at designing a simple game in order to teach myself Python.
 
-Pick a warrior, rogue or wizard and fight your way through the Kobold Mines. The
-more kobolds you slay, the nastier they get. Slay ten and you reach the Kobold
-Leader's chamber, where you win by defeating it.
+Pick a warrior, rogue or wizard and fight down through three stages of the
+Kobold Mines: the Upper Mines, the Deep Warrens and the Hoard. Each ends with a
+boss: the Kobold Leader, the Kobold Warchief, and finally Cinderjaw the Red,
+the dragon the kobolds serve.
 
 Each class carries different gear and finds loot to match:
 
 | Class   | Gear            | Special                                         |
 |---------|-----------------|-------------------------------------------------|
 | Warrior | Sword & shield  | None, just a lot of health                      |
-| Rogue   | Two swords      | Flee (not from the Leader)                      |
+| Rogue   | Two swords      | Flee (not from bosses)                          |
 | Wizard  | Staff & shield  | Fireball, which costs mana; staves add spell power or mana |
+
+Fights go in rounds: every hero in your party gets orders, then the enemy
+strikes back at one of you. Defending sets up a parry or counterattack if
+you're the one it targets.
+
+After the first two bosses you can free a prisoner from the boss's cage to
+join your party (up to three heroes), or keep the hoard to power up your hero.
+A fallen companion stays down; the run ends when the whole party falls.
 
 Swords add attack and shields add max HP. When you find something for a full
 slot, you choose whether to swap it in. After every fight you rest, recovering
-some health and all of your mana.
+some health and all of your mana. You start with two bandages for bigger
+wounds; kobolds drop more now and then, and bosses always do.
 
 ## Playing
 

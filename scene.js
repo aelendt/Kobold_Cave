@@ -6,16 +6,19 @@ const panel = document.getElementById('scene');
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 
 // Last health seen for each fighter, so updates can animate the change.
-let previous = { party: [], enemy: null };
+// Party members are keyed by name, since the party changes as people join.
+let previous = { party: {}, enemy: null };
 
 function sprite(name) {
+  const rows = SPRITES[name] || [];
   const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = 16;
+  canvas.width = rows[0]?.length || 16;
+  canvas.height = rows.length || 16;
   canvas.className = 'sprite';
   canvas.setAttribute('role', 'img');
   canvas.setAttribute('aria-label', name);
   const ctx = canvas.getContext('2d');
-  (SPRITES[name] || []).forEach((row, y) => [...row].forEach((ch, x) => {
+  rows.forEach((row, y) => [...row].forEach((ch, x) => {
     if (ch === '.') return;
     ctx.fillStyle = PALETTE[ch];
     ctx.fillRect(x, y, 1, 1);
@@ -43,8 +46,10 @@ function bar(kind, value, max, from = value) {
   return track;
 }
 
-function fighter({ spriteName, title, subtitle, health, maxHealth, mana, maxMana, before, boss }) {
+function fighter({ spriteName, title, subtitle, health, maxHealth, mana, maxMana, before, boss, active }) {
   const figure = element('figure', 'fighter');
+  if (active) figure.classList.add('active');
+  if ((SPRITES[spriteName]?.length || 16) > 16) figure.classList.add('big');
   const portrait = element('div', 'portrait');
   portrait.append(sprite(spriteName));
   figure.append(portrait);
@@ -75,8 +80,8 @@ function fighter({ spriteName, title, subtitle, health, maxHealth, mana, maxMana
   return figure;
 }
 
-function partySide(party, scene) {
-  const side = element('div', 'side party');
+function partySide({ party, active, bandages }, scene) {
+  const side = element('div', `side party size-${party.length}`);
   party.forEach((member, i) => {
     side.append(fighter({
       spriteName: member.job.toLowerCase(),
@@ -86,11 +91,16 @@ function partySide(party, scene) {
       maxHealth: member.max_health,
       mana: member.mana,
       maxMana: member.max_mana,
-      before: previous.party[i],
+      before: previous.party[member.name],
+      active: scene === 'combat' && i === active,
     }));
   });
-  previous.party = party.map(member => member.health);
+  previous.party = Object.fromEntries(party.map(member => [member.name, member.health]));
   if (scene === 'victory') side.classList.add('triumph');
+  if (bandages !== undefined) {
+    const supplies = element('div', 'supplies', `Bandages: ${bandages}`);
+    side.append(supplies);
+  }
   return side;
 }
 
@@ -144,24 +154,56 @@ function jobCards(jobs, pick) {
   return grid;
 }
 
+function recruitCards({ prisoners, boon }, pick) {
+  const grid = element('div', 'jobs recruits');
+  const options = [...prisoners.map(p => p.name), 'Power up'];
+  prisoners.forEach((prisoner, i) => {
+    const card = element('button', 'job');
+    card.type = 'button';
+    card.addEventListener('click', () => pick(prisoner.name));
+    const portrait = element('div', 'portrait');
+    portrait.append(sprite(prisoner.job.toLowerCase()));
+    const heading = element('div', 'who');
+    heading.append(element('kbd', '', String(i + 1)), document.createTextNode(prisoner.name));
+    card.append(portrait, heading, element('div', 'what', `${prisoner.job} · ${prisoner.max_health} HP`),
+                element('div', 'what', prisoner.special || 'No special move'));
+    grid.append(card);
+  });
+  const chest = element('button', 'job boon');
+  chest.type = 'button';
+  chest.addEventListener('click', () => pick('Power up'));
+  const portrait = element('div', 'portrait');
+  portrait.append(sprite('chest'));
+  const heading = element('div', 'who');
+  heading.append(element('kbd', '', String(options.length)), document.createTextNode('Power up'));
+  chest.append(portrait, heading, element('div', 'what', `${boon.name} for ${boon.for}`),
+               element('div', 'what', boon.describe));
+  grid.append(chest);
+  return grid;
+}
+
 export function showScene(scene, details, { pick }) {
   panel.hidden = false;
   panel.dataset.scene = scene;
   if (scene === 'jobs') {
-    previous = { party: [], enemy: null };
+    previous = { party: {}, enemy: null };
     panel.replaceChildren(jobCards(details.jobs, pick));
+    return;
+  }
+  if (scene === 'recruit') {
+    panel.replaceChildren(recruitCards(details, pick));
     return;
   }
   // Every fight is preceded by an 'explore' scene, which clears the enemy's
   // previous health, so a new kobold's bar starts full rather than sliding.
   const arena = element('div', 'arena');
-  arena.append(partySide(details.party, scene), enemySide(details.enemy, scene));
+  arena.append(partySide(details, scene), enemySide(details.enemy, scene));
   panel.replaceChildren(arena);
   if (reduceMotion.matches) panel.querySelectorAll('.float').forEach(el => el.remove());
 }
 
 export function clearScene() {
-  previous = { party: [], enemy: null };
+  previous = { party: {}, enemy: null };
   panel.hidden = true;
   panel.replaceChildren();
 }
