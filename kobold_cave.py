@@ -265,7 +265,24 @@ def hero_view(character):
             'hero': character.hero, 'level': character.level, 'xp': character.xp,
             'xp_from': LEVEL_XP[character.level - 1],
             'xp_to': LEVEL_XP[character.level] if character.level < len(LEVEL_XP) else None,
-            'effects': hero_effects(character)}
+            'effects': hero_effects(character),
+            'attack': character.attack, 'dodge': character.dodge,
+            'spell_power': character.spell_power,
+            'gear': [{'slot': slot, 'name': item.name if item else None,
+                      'describe': item.describe() if item else ''}
+                     for slot, item in character.equipment.items()],
+            'skills': [skill_view(character, name) for name in character.actions],
+            'boons': [boon.name for boon in character.boons]}
+
+
+def skill_view(member, name):
+    """A skill as the party panel shows it: what it does and whether it's ready."""
+    action = ACTIONS[name]
+    kind = ('signature' if name in member.job.actions else
+            'boon' if name in member.job.boon_abilities else 'skill')
+    return {'name': name, 'kind': kind, 'description': action.description,
+            'mana': action.mana, 'waiting': member.cooldowns.get(name, 0),
+            'used': action.once and name in member.used}
 
 
 def hero_effects(member):
@@ -289,7 +306,11 @@ def monster_effects(monster):
 def monster_view(monster):
     return {'name': monster.name, 'health': monster.health,
             'max_health': monster.max_health, 'boss': monster.boss,
-            'effects': monster_effects(monster)}
+            'effects': monster_effects(monster), 'attack': monster.attack,
+            'abilities': [{'name': name, 'description': MONSTER_ABILITIES[name].description,
+                           'signature': name == monster.signature}
+                          for name in monster.abilities + ((monster.signature,)
+                                                           if monster.signature else ())]}
 
 
 def narrate(member, you, them):
@@ -305,6 +326,7 @@ class Party:
     cs: int = 0  # creep score: how many kobolds you have slain
     stage: str = ''
     depth: int = 0  # index of the current stage in STAGES, for its loot
+    kills: int = 0  # kobolds slain in the current stage
     bag: list = field(default_factory=list)  # spare items, handed out between fights
     bag_changed: bool = False  # something went in since the bag was last offered
     smoke: bool = False  # Smoke Bomb: every strike misses this round
@@ -322,8 +344,11 @@ class Party:
 def show_party(scene, party, monster=None, active=None):
     details = {'party': [hero_view(member) for member in party.members],
                'bandages': party.bandages, 'cs': party.cs, 'stage': party.stage,
-               'bag': [item.name for item in party.bag],
-               'active': party.members.index(active) if active else None}
+               'bag': [{'name': item.name, 'describe': item.describe()} for item in party.bag],
+               'active': party.members.index(active) if active else None,
+               'depth': party.depth, 'kills': party.kills,
+               'stages': [{'name': stage.name, 'fights': stage.fights,
+                           'boss': BESTIARY[stage.boss].name} for stage in STAGES]}
     if monster:
         details['enemy'] = monster_view(monster)
     show(scene, **details)
@@ -1578,11 +1603,12 @@ def clear_stage(party, stage, rng=random, ask=input):
         print('')
         print(stage.arrival)
     show_party('explore', party)
-    kills = 0
+    kills = party.kills = 0
     while party.alive and kills < stage.fights:
         monster = spawn(roll_on_table(encounter_table(stage, kills), rng))
         if fight(party, monster, rng, ask):
             kills += 1
+            party.kills = kills
             party.cs += 1
             print('Your enemy has fallen. You may move on.')
             print(f'Creep Score: {party.cs}')

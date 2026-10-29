@@ -94,7 +94,7 @@ function fighter({ spriteName, title, subtitle, health, maxHealth, mana, maxMana
   return figure;
 }
 
-function partySide({ party, active, bandages, bag = [] }, scene) {
+function partySide({ party, active }, scene) {
   const side = element('div', `side party size-${party.length}`);
   party.forEach((member, i) => {
     side.append(fighter({
@@ -113,11 +113,6 @@ function partySide({ party, active, bandages, bag = [] }, scene) {
   });
   previous.party = Object.fromEntries(party.map(member => [member.name, member.health]));
   if (scene === 'victory') side.classList.add('triumph');
-  if (bandages !== undefined) {
-    const supplies = element('div', 'supplies', `Bandages: ${bandages} · Bag: ${bag.length}`);
-    if (bag.length) supplies.title = bag.join(', ');
-    side.append(supplies);
-  }
   return side;
 }
 
@@ -130,7 +125,7 @@ function enemySide(enemy, scene) {
       subtitle: enemy.boss ? 'Master of the mines' : 'Kobold',
       health: enemy.health,
       maxHealth: enemy.max_health,
-      before: previous.enemy,
+      before: previous.enemy ?? undefined,  // no previous health: a new enemy, nothing to animate
       boss: enemy.boss,
       effects: enemy.effects,
     }));

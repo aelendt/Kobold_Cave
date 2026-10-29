@@ -125,7 +125,12 @@ To see every dice roll, set `DEBUG = True` at the top of `kobold_cave.py`.
 `index.html` runs the same `kobold_cave.py` in Chrome using
 [Pyodide](https://pyodide.org) (Python compiled to WebAssembly). Menus become
 buttons, number keys pick options, and a picture panel shows pixel-art
-portraits, health bars and mana for each fight. The sprites live in
+portraits, health bars and mana for each fight. The newest turn is always at
+the top of the log, just under your choices. A party panel on the left has a
+tab per hero with their stats, gear and skills (with cooldowns), and field
+notes on the right show the current enemy's abilities, your progress through
+the stages, and your supplies. On narrower screens the two panels open as
+drawers from the header. The sprites live in
 `sprites.js` as 16x16 grids of letters, one per pixel, so you can edit them in
 any text editor. Serve the folder, then open
 http://localhost:8000 in Chrome 137 or newer:

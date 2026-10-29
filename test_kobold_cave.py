@@ -993,6 +993,27 @@ class ShowHookTests(unittest.TestCase):
         self.assertEqual([p['name'] for p in recruit['prisoners']], ['Brann'])
         self.assertEqual([a['name'] for a in recruit['abilities']], ['Execute', 'Last Stand'])
 
+    def test_panel_data_covers_stats_gear_skills_and_the_journey(self):
+        wizard = hero('wizard', skills=['Fireball', 'Meteor'])
+        game.equip(wizard, 'Trinket', game.ITEMS['lucky_coin'])
+        wizard.cooldowns['Meteor'] = 2
+        party = party_of(wizard)
+        party.bag = [game.ITEMS['fine_sword']]
+        game.show_party('combat', party, game.spawn('kobold_shaman'), active=wizard)
+        details = json.loads(self.scenes[-1][1])
+        member = details['party'][0]
+        self.assertEqual(member['spell_power'], 60)
+        self.assertIn({'slot': 'Trinket', 'name': 'Lucky Coin',
+                       'describe': game.ITEMS['lucky_coin'].describe()}, member['gear'])
+        skills = {skill['name']: skill for skill in member['skills']}
+        self.assertEqual(skills['Mana Surge']['kind'], 'signature')
+        self.assertEqual(skills['Meteor']['kind'], 'boon')
+        self.assertEqual(skills['Meteor']['waiting'], 2)
+        self.assertEqual(details['enemy']['abilities'][0]['name'], 'Hex')
+        self.assertEqual([stage['boss'] for stage in details['stages']],
+                         ['Kobold Leader', 'Kobold Warchief', 'Cinderjaw the Red'])
+        self.assertEqual(details['bag'][0]['name'], 'Fine Sword')
+
     def test_class_cards_are_plain_data(self):
         game.show('jobs', jobs=[game.job_view(job) for job in game.JOBS.values()])
         self.assertEqual(self.scenes[0][0], 'jobs')
