@@ -385,13 +385,13 @@ export function showSpoils(spoils, details) {
   });
 }
 
-function forkCards(pick) {
+// The three ways on: a kobold you can see, the boss's lair, a trader with
+// his own wares, a dark tunnel or a forge. Two can be alike.
+function forkCards({ ways }, pick) {
   const grid = element('div', 'jobs');
-  [['anvil', 'Forge', 'Break old gear into scrap. Spend scrap to reforge equipped gear, up to +3.'],
-   ['trader', 'Trader', 'Spend gold on bandages, vials, trinkets and skill tomes. Sell old gear.'],
-   ['tunnel', 'Tunnel', 'A forgotten cache of gold and loot. Or an ambush.']]
-    .forEach(([spriteName, title, text], i) => grid.append(
-      choiceCard(spriteName, i + 1, title, [[text]], () => pick(title))));
+  ways.forEach((way, i) => grid.append(choiceCard(
+    way.sprite, i + 1, way.title, [[way.side, 'what side'], [way.text]],
+    () => pick(way.side), `way ${way.kind}`)));
   return grid;
 }
 
@@ -433,7 +433,7 @@ export function showScene(scene, details, { pick }) {
     return;
   }
   if (scene === 'fork') {
-    panel.replaceChildren(forkCards(pick));
+    panel.replaceChildren(forkCards(details, pick));
     return;
   }
   if (scene === 'forge') {

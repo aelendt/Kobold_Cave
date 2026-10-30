@@ -10,7 +10,9 @@ the dragon the kobolds serve.
 Each class carries different gear, finds loot to match, and has its own
 moves. Every run you're offered 3 of your class's 5 skills and pick 1, so no
 two runs play quite the same. Keeping a boss's hoard teaches a Boon Ability:
-a powerful move with a longer cooldown.
+a powerful move with a longer cooldown. Boon Abilities take time to gather:
+none can be used in the first two rounds of a fight, so they can't open every
+battle.
 
 Slain kobolds give the party experience. Each level raises your stats (but
 heals nothing; that's what bandages are for), and levels 2 and 4 each offer a
@@ -94,18 +96,28 @@ the Upper Mines turn up Fine and Firebrand gear, the Deep Warrens Firebrand and
 Mithril, and the Hoard Mithril and Dragonbone. Rogues can carry a parrying
 dagger in their off hand instead of a second sword: less attack, more health.
 
-Twice in each of the first two stages, and once in the Hoard, the tunnel
-splits three ways:
+After every fight the tunnel splits three ways, and you choose the way on.
+Each way is one of these, at random, and two or even three can be the same
+kind:
 
-- **The Forge:** break bag items down into scrap (1 to 4 each, by tier) and
-  spend scrap to reforge a hero's equipped weapon, shield or staff, up to +3.
-  Reforges cost 2, 3, then 4 scrap.
-- **The Trader:** spend gold on bandages (8), a Troll's Blood Vial (20), a
-  trinket (30), or a skill tome (45) that teaches one of your heroes a new
-  skill. He'll also buy your old gear.
+- **A kobold you can see:** its name, health and how hard it hits, and
+  whether its camp is worth searching. Pick the easy one, or the one with the
+  better loot.
+- **The Trader:** each trader has his own wares, listed before you choose:
+  bandages (8 gold), a Troll's Blood Vial (20), a trinket (30), two pieces of
+  gear from the stage's better tiers (25 to 130, by tier) and a skill tome (45)
+  that teaches one of your heroes a new skill. He'll also buy your old gear.
 - **A dark tunnel:** half the time a forgotten cache of gold and maybe an
-  item; half the time an ambush by the stage's toughest kobolds, who strike
-  first. Win, and you keep its XP and gold.
+  item; half the time an ambush by one of the stage's toughest kobolds, which
+  strikes first. Win, and you keep its XP and gold.
+- **The Forge** (rare): break bag items down into scrap (1 to 4 each, by tier)
+  and spend scrap to reforge a hero's equipped weapon, shield or staff, up to
+  +3. Reforges cost 2, 3, then 4 scrap.
+
+A detour is a stop on the way, not instead of a fight: past the trader, the
+forge or the cache, a kobold is waiting. Once a stage's kobolds are beaten, a
+fight becomes the boss's lair, and every detour leads there too, so the last
+split is your chance to stock up before the boss.
 
 Kobolds drop gold when they fall, and bosses drop a lot of it.
 
@@ -173,8 +185,9 @@ and the gold counts up. If new gear went in the bag, the game waits for you to
 equip it before the next fight. A party panel on the left has a
 tab per hero with their stats, gear and skills (with cooldowns), and field
 notes on the right show the current enemy's abilities, your progress through
-the stages, and your supplies. On narrower screens the two panels open as
-drawers from the header. The sprites live in
+the stages, and your supplies. Each section is a card with its own colour, and
+you can drag sections (or use their arrows) into any order. On narrower
+screens the two panels open as drawers from the header. The sprites live in
 `sprites.js` as 16x16 grids of letters, one per pixel, so you can edit them in
 any text editor. Serve the folder, then open
 http://localhost:8000 in Chrome 137 or newer:
@@ -188,6 +201,16 @@ it from reading `kobold_cave.py`. The page loads Pyodide from the jsDelivr CDN;
 to play offline, put a copy of Pyodide (from `npm install pyodide@314.0.7`) in
 a `pyodide/` folder next to `index.html`.
 
+## The Hall of Legends
+
+Every run is remembered when it ends. Its score is the XP earned, plus the gold
+found, plus 25 for each Flawless, Swift or Overkill win, plus 500 for slaying
+Cinderjaw. In the browser the Hall button in the header opens the hall: totals,
+your best runs and your most recent ones, with who you played, how far you got
+and what killed you. The browser keeps it in its own storage, so it lives in
+that browser. The terminal keeps it in `kobold_cave_hall.json` next to the
+game and prints the top five after each run.
+
 ## Tests
 
 ```bash
@@ -197,13 +220,14 @@ python3 -m unittest
 ### Checking the balance
 
 `balance_bot.py` plays whole runs with a bot that uses its skills, heals when
-hurt, equips better gear and spends its gold and scrap, then reports how often
-each class wins and what killed it the rest of the time. Runs are seeded, so
+hurt, picks its way through the tunnels, equips better gear and spends its
+gold and scrap, then reports how often each class wins, its average score and
+what killed it the rest of the time. Runs are seeded, so
 the same command gives the same numbers until the game changes; compare before
 and after a change rather than reading the numbers as a person's odds.
 
 ```bash
 python3 balance_bot.py                        # 200 runs of each class
 python3 balance_bot.py --runs 1000 --hoard    # keep every hoard, so play alone
-python3 balance_bot.py --job wizard --fork Trader
+python3 balance_bot.py --job wizard
 ```

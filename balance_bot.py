@@ -1,14 +1,14 @@
 """A bot that plays whole runs of Kobold Cave, for checking the balance.
 
 It answers the game's questions the way a sensible player would: it uses
-its skills, guards against announced moves, heals when hurt, equips better
-gear and spends its gold and scrap. It is not a perfect player, so its win
+its skills, guards against announced moves, heals when hurt, picks its way
+through the tunnels, equips better gear and spends its gold and scrap. It is not a perfect player, so its win
 rates are best used to compare classes, or the same class before and after
 a change, rather than as the odds a person will see.
 
     python3 balance_bot.py                 # 200 runs of each class
     python3 balance_bot.py --runs 400 --hoard
-    python3 balance_bot.py --job wizard --fork trader
+    python3 balance_bot.py --job wizard
 
 Runs are seeded 0, 1, 2 and so on, so the same command gives the same
 numbers until the game changes.
@@ -40,11 +40,13 @@ EFFECT_VALUE = {'lifesteal': 18, 'lucky': 22, 'thorns': 15, 'fireward': 12, 'sat
 class Bot:
     """Stands in for input(): call it with a question, get back an answer."""
 
-    def __init__(self, job_key, rng, hoard=False, fork=None):
+    def __init__(self, job_key, rng, hoard=False):
         # The bot's own dice, so its choices don't shift the game's rolls.
-        self.job_key, self.rng, self.hoard, self.fork = job_key, rng, hoard, fork
+        self.job_key, self.rng, self.hoard = job_key, rng, hoard
         self.party = None
-        self.monster = None  # the enemy in the current fight, see watch_fights
+        self.monster = None  # the enemy in the current fight, see watch_game
+        self.ways = []  # the ways on offered at the last split
+        self.stock = []  # the wares of the trader it went to
         self.mend_target = None
         self.answers = 0
 
@@ -76,7 +78,9 @@ class Bot:
         if question.startswith('Who claims'):
             return options[0]
         if question.startswith('Which way?'):
-            return self.fork or options[self.rng.randint(0, len(options) - 1)]
+            way = self.choose_way()
+            self.stock = way.stock
+            return game.SIDES[self.ways.index(way)]
         if question.startswith('What will you do at the forge?'):
             if party.bag:
                 return 'Salvage'
@@ -153,6 +157,35 @@ class Bot:
             moves = ('Fireball', 'Arcane Shield', 'Frost Bolt', 'Drain Life', 'Mana Surge')
         return next((name for name in moves if ready(name)), 'Attack')
 
+    def choose_way(self):
+        """The forge when there is something to work with, a trader when
+        there is gold to spend, otherwise the least dangerous fight in sight
+        (or a tunnel, sometimes, for the gamble)."""
+        party = self.party
+        by_kind = {}
+        for way in self.ways:
+            by_kind.setdefault(way.kind, []).append(way)
+        if 'forge' in by_kind and (party.bag or party.scrap >= 2):
+            return by_kind['forge'][0]
+        if 'trader' in by_kind and party.gold >= 30:
+            return max(by_kind['trader'], key=lambda way: self.shopping_value(way.stock))
+        if 'lair' in by_kind:
+            return by_kind['lair'][0]
+        fights = by_kind.get('fight', [])
+        if fights and (self.rng.randint(1, 4) > 1 or 'tunnel' not in by_kind):
+            return min(fights, key=lambda way: game.BESTIARY[way.monster].health
+                       * game.BESTIARY[way.monster].attack)
+        return (by_kind.get('tunnel') or self.ways)[0]
+
+    def upgrade(self, item):
+        """How much better an item is than what its best taker wears."""
+        return max((self.worth(member, item) - self.worth(member, member.equipment[slot])
+                    for member in self.party.living for slot in game.slots_for(member, item)),
+                   default=0)
+
+    def shopping_value(self, stock):
+        return sum(self.upgrade(wares) for _, _, wares in stock if isinstance(wares, game.Item))
+
     def worth(self, member, item):
         """A rough score for an item in this member's hands."""
         if item is None:
@@ -199,6 +232,12 @@ class Bot:
         tome = next((option for option in options if option.startswith('Tome')), None)
         if tome and party.gold >= 45:
             return tome
+        gear = [(self.upgrade(wares), label) for label, price, wares in self.stock
+                if label in options and isinstance(wares, game.Item) and wares.tier
+                and price <= party.gold]
+        best = max(gear, default=None)
+        if best and best[0] >= 8:
+            return best[1]
         if "Troll's Blood Vial" in options and party.gold >= 20 \
                 and any(member.trinket is None for member in party.living):
             return "Troll's Blood Vial"
@@ -208,35 +247,36 @@ class Bot:
 
 
 @contextmanager
-def watch_fights(bot, deaths):
-    """Let the bot see each fight's enemy, and note who ended the run."""
-    fight_rounds = game.fight_rounds
+def watch_game(bot):
+    """Let the bot see each fight's enemy and the ways it is offered, as a
+    player sees them on screen."""
+    fight_rounds, roll_ways = game.fight_rounds, game.roll_ways
 
-    def watched(party, monster, rng, ask):
+    def watched_fight(party, monster, rng, ask):
         bot.monster = monster
-        alive = fight_rounds(party, monster, rng, ask)
-        if not party.alive:
-            deaths.append((party.stage, monster.name))
-        return alive
+        return fight_rounds(party, monster, rng, ask)
 
-    game.fight_rounds = watched
+    def watched_ways(*args):
+        bot.ways = roll_ways(*args)
+        return bot.ways
+
+    game.fight_rounds, game.roll_ways = watched_fight, watched_ways
     try:
         yield
     finally:
-        game.fight_rounds = fight_rounds
+        game.fight_rounds, game.roll_ways = fight_rounds, roll_ways
 
 
-def play_run(job_key, seed, hoard=False, fork=None):
-    """Play one run quietly. Returns (won, (stage, enemy) that ended it or None)."""
+def play_run(job_key, seed, hoard=False):
+    """Play one run quietly. Returns (won, the record the hall would keep)."""
     rng = random.Random(seed)
-    bot = Bot(job_key, random.Random(-1 - seed), hoard, fork)
+    bot = Bot(job_key, random.Random(-1 - seed), hoard)
     hero = game.Character.create('Bot', game.JOBS[job_key], hero=True)
     bot.party = game.Party([hero])
-    deaths = []
-    with watch_fights(bot, deaths), redirect_stdout(StringIO()):
+    with watch_game(bot), redirect_stdout(StringIO()):
         game.choose_skill(hero, rng, bot, count=3)
         won = game.play(bot.party, rng, bot)
-    return won, (deaths[0] if deaths else None)
+    return won, game.run_record(bot.party, won)
 
 
 def main():
@@ -246,18 +286,18 @@ def main():
     parser.add_argument('--job', choices=list(game.JOBS), help='only this class')
     parser.add_argument('--hoard', action='store_true',
                         help='keep the hoard after each boss instead of freeing the prisoner')
-    parser.add_argument('--fork', choices=['Forge', 'Trader', 'Tunnel'],
-                        help='always take this way at forks (default: at random)')
     args = parser.parse_args()
     for job_key in [args.job] if args.job else list(game.JOBS):
-        wins, killers = 0, Counter()
+        wins, killers, scores = 0, Counter(), []
         for seed in range(args.runs):
-            won, death = play_run(job_key, seed, args.hoard, args.fork)
+            won, record = play_run(job_key, seed, args.hoard)
             wins += won
-            if death:
-                killers[death[1]] += 1
+            scores.append(record['score'])
+            if not won:
+                killers[record['killer']] += 1
         top = ', '.join(f'{name} {count}' for name, count in killers.most_common(4))
-        print(f'{job_key:8} {wins / args.runs:5.0%}  lost to: {top or "nothing"}')
+        print(f'{job_key:8} {wins / args.runs:5.0%}  average score {sum(scores) // len(scores):>4}'
+              f'  lost to: {top or "nothing"}')
 
 
 if __name__ == '__main__':

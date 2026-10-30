@@ -71,15 +71,34 @@ main { grid-area: main; display: flex; flex-direction: column; min-height: 0; mi
   font: 400 1.25rem/1 var(--font-display);
   color: var(--lantern);
 }
-.panel-section { display: flex; flex-direction: column; gap: 0.4rem; }
+/* Each section is a card with its own accent, so they're easy to tell
+   apart at a glance and the order they've been dragged into is clear. */
+.panel-section {
+  --accent: var(--dust-dim);
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.55rem 0.7rem 0.7rem;
+  background: rgba(255, 236, 210, 0.035);
+  border: 1px solid var(--seam);
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+}
+.panel-section[data-key="stats"] { --accent: var(--hp-hi); }
+.panel-section[data-key="gear"], .panel-section[data-key="supplies"] { --accent: var(--copper); }
+.panel-section[data-key="skills"] { --accent: var(--mana); }
+.panel-section[data-key="boons"], .panel-section[data-key="trophies"] { --accent: var(--gold); }
+.panel-section[data-key="enemy"] { --accent: var(--blood); }
+.panel-section[data-key="journey"] { --accent: var(--lantern); }
 .panel-section h2 {
   margin: 0;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
+  font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--dust-dim);
+  color: var(--accent);
   border-bottom: 1px solid var(--seam);
-  padding-bottom: 0.25rem;
+  padding-bottom: 0.3rem;
 }
 /* Sections can be dragged by their heading or moved with its arrows (panels.js). */
 .panel-section h2 { display: flex; align-items: center; gap: 0.4rem; cursor: grab; }
@@ -95,8 +114,8 @@ button.reorder-button {
 }
 button.reorder-button:disabled { visibility: hidden; }
 .panel-section.dragging { opacity: 0.4; }
-.panel-section.drop-before { box-shadow: 0 -2px 0 var(--lantern); }
-.panel-section.drop-after { box-shadow: 0 2px 0 var(--lantern); }
+.panel-section.drop-before { box-shadow: 0 -3px 0 var(--lantern); }
+.panel-section.drop-after { box-shadow: 0 3px 0 var(--lantern); }
 .tabs { display: flex; flex-wrap: wrap; gap: 0.3rem; }
 .tab { padding: 0.4rem 0.6rem; font-size: 0.85rem; }
 .tab[aria-selected="true"] { border-color: var(--lantern); color: var(--lantern); }
@@ -250,6 +269,51 @@ h1 {
 #log .system { color: var(--dust-dim); font-style: italic; }
 #log .chapter { color: var(--gold); font: 400 1.2rem/1.3 var(--font-display); margin-bottom: 0.3rem; }
 #log .chapter.fight { color: var(--blood); }
+/* --- Hall of legends (hall.js) --- */
+#hall-dialog {
+  width: min(36rem, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  box-sizing: border-box;
+  padding: 1.25rem 1.5rem;
+  color: var(--dust);
+  background: var(--rock-raised);
+  border: 1px solid var(--gold);
+  border-radius: 4px;
+  box-shadow: 0 0 40px rgba(0, 0, 0, 0.7), 0 0 24px rgba(244, 210, 122, 0.15);
+}
+#hall-dialog[open] { display: flex; flex-direction: column; gap: 0.75rem; }
+#hall-dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+#hall-dialog > .what { margin: -0.5rem 0 0; }
+.hall-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.hall-head h2 { margin: 0; font: 400 1.6rem/1.15 var(--font-display); color: var(--gold); }
+button.hall-close { padding: 0.4rem 0.7rem; font-size: 0.8rem; }
+dl.hall-totals { margin: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.5rem; }
+dl.hall-totals div { padding: 0.45rem 0.55rem; border: 1px solid var(--seam); border-radius: 3px; }
+dl.hall-totals dt { font-size: 0.65rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dust-dim); }
+dl.hall-totals dd { margin: 0; font-weight: 700; color: var(--gold); font-variant-numeric: tabular-nums; }
+ol.hall-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; min-height: 0; display: flex; flex-direction: column; }
+li.hall-run {
+  display: grid;
+  grid-template-columns: 1.8rem minmax(0, 1fr) auto;
+  gap: 0.6rem;
+  align-items: baseline;
+  padding: 0.55rem 0.3rem;
+  border-bottom: 1px dashed var(--seam);
+}
+li.hall-run.latest { background: rgba(240, 167, 60, 0.08); }
+.hall-rank { color: var(--dust-dim); font-variant-numeric: tabular-nums; text-align: right; }
+.hall-body { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+.hall-top { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: baseline; }
+.hall-outcome { font-size: 0.85rem; color: var(--blood); }
+li.hall-run.won .hall-outcome { color: var(--gold); font-weight: 700; }
+.hall-score { font-weight: 700; color: var(--gold); font-variant-numeric: tabular-nums; }
+.hall-empty { padding: 1rem 0; color: var(--dust-dim); font-style: italic; }
+.hall-note { margin: 0; font-size: 0.72rem; }
+#open-hall { padding: 0.4rem 0.7rem; font-size: 0.8rem; }
+@media (max-width: 34rem) {
+  #hall-dialog { padding: 1rem 1.1rem; }
+  dl.hall-totals { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 /* --- Spoils pop-up (showSpoils in scene.js) --- */
 #spoils-dialog {
   width: min(24rem, calc(100vw - 32px));
@@ -407,6 +471,9 @@ form { display: flex; gap: 0.5rem; }
 .party.size-3 .what { display: none; }
 .supplies { font-size: 0.75rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--dust-dim); }
 .jobs.recruits { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+button.job .side { letter-spacing: 0.08em; text-transform: uppercase; font-size: 0.68rem; }
+button.job.way.fight .side, button.job.way.lair .side { color: var(--blood); }
+button.job.way.lair { border-color: rgba(224, 98, 90, 0.6); }
 button.job.boon { border-color: rgba(243, 195, 79, 0.45); }
 button.job .lesson { color: var(--gold); }
 .who { font-weight: 700; color: var(--dust); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -583,6 +650,7 @@ button.drawer-close { padding: 0.4rem 0.7rem; font-size: 0.8rem; }
       <span class="depth" id="status">Lighting the lantern…</span>
       <button class="drawer-toggle" id="toggle-party" type="button" aria-controls="party-panel">Party</button>
       <button class="drawer-toggle" id="toggle-info" type="button" aria-controls="info-panel">Notes</button>
+      <button id="open-hall" type="button" aria-haspopup="dialog">Hall</button>
     </div>
   </header>
   <aside class="panel" id="party-panel" aria-label="Party"></aside>
@@ -604,10 +672,12 @@ button.drawer-close { padding: 0.4rem 0.7rem; font-size: 0.8rem; }
   <div id="backdrop"></div>
 </div>
 <dialog id="spoils-dialog" aria-label="Spoils of battle"></dialog>
+<dialog id="hall-dialog" aria-label="Hall of Legends"></dialog>
 
 <script type="module">
 import { showScene, showSpoils, celebrate, clearScene } from './scene.js';
 import { drawPartyPanel, drawInfoPanel, clearPanels, onEquip, onCloseDrawer } from './panels.js';
+import { addRun, showHall } from './hall.js';
 
 // Pyodide is tried from a local copy first (see README), then the CDN.
 const PYODIDE_SOURCES = ['./pyodide/', 'https://cdn.jsdelivr.net/npm/pyodide@314.0.7/'];
@@ -718,6 +788,13 @@ let resolveAnswer = null;
 window.drawScene = function (scene, json) {
   const details = JSON.parse(json);
   enqueue(() => {
+    // The end of a run: into the hall of legends, and say where it placed.
+    if (scene === 'record') {
+      const { place, of } = addRun(details.run);
+      addLine(`Hall of Legends: this run scored ${details.run.score.toLocaleString()}, `
+              + `#${place} of ${of}.`, 'victory');
+      return;
+    }
     // Fights start and end new blocks in the log, so each one stands apart.
     if (scene === 'encounter' || scene === 'aftermath') {
       newTurn();
@@ -796,7 +873,7 @@ form.addEventListener('submit', event => {
 
 // Number keys pick a menu option while the text box is empty.
 document.addEventListener('keydown', event => {
-  if (document.getElementById('spoils-dialog').open) return;  // the pop-up handles its own keys
+  if (document.querySelector('dialog[open]')) return;  // pop-ups handle their own keys
   if (revealing && !event.ctrlKey && !event.metaKey && !event.altKey) {
     skipAhead();
     return;
@@ -891,6 +968,10 @@ kobold_cave.show = web_show
       const again = document.createElement('button');
       again.type = 'button';
       again.innerHTML = '<kbd>1</kbd>Descend again';
+      const hall = document.createElement('button');
+      hall.type = 'button';
+      hall.innerHTML = '<kbd>2</kbd>Hall of Legends';
+      hall.addEventListener('click', () => showHall());
       again.addEventListener('click', () => {
         resolveAnswer = null;
         log.replaceChildren();
@@ -900,7 +981,7 @@ kobold_cave.show = web_show
         statusLabel.textContent = 'At the entrance';
         resolve();
       });
-      choices.append(again);
+      choices.append(again, hall);
       resolveAnswer = () => {};  // lets the number-key shortcut reach the button
       again.focus();
     });
@@ -925,6 +1006,7 @@ for (const [buttonId, panelId] of [['toggle-party', 'party-panel'], ['toggle-inf
   });
 }
 backdrop.addEventListener('click', closeDrawers);
+document.getElementById('open-hall').addEventListener('click', () => { closeDrawers(); showHall(); });
 onCloseDrawer(closeDrawers);
 document.addEventListener('keydown', event => { if (event.key === 'Escape') closeDrawers(); });
 

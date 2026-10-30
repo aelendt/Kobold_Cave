@@ -1,4 +1,7 @@
 import json
+import os
+import random
+import tempfile
 import unittest
 from contextlib import redirect_stdout
 from dataclasses import replace
@@ -561,7 +564,7 @@ class WarriorSkillTests(unittest.TestCase):
         self.assertEqual(monster.health, 60 - round(15 * 1.5))
         _, out = captured(game.take_turn, warrior, party, monster, FakeRng(0),
                           answers('cleave', 'attack'))
-        self.assertIn('not ready to use Cleave again (3 more rounds)', out)
+        self.assertIn('not ready to use Cleave yet (3 more rounds)', out)
         for _ in range(3):
             game.end_round(party)
         self.assertEqual(warrior.cooldowns, {})
@@ -1024,27 +1027,53 @@ class ForgeTests(unittest.TestCase):
 
 
 class TraderTests(unittest.TestCase):
-    def test_trader_sells_bandages_vials_a_trinket_and_a_tome(self):
+    def test_trader_sells_supplies_a_trinket_gear_and_a_tome(self):
         rogue = hero('rogue', skills=['Twin Strike'])
-        labels = [label for label, _, _ in game.trader_stock(party_of(rogue), FakeRng(0, 0))]
+        stock = game.trader_stock(party_of(rogue), random.Random(0))
+        labels = [label for label, _, _ in stock]
         self.assertEqual(labels[:2], ['Bandage', "Troll's Blood Vial"])
-        self.assertEqual(len(labels), 4)
-        self.assertTrue(labels[3].startswith('Tome of '))
+        self.assertEqual(stock[2][2].kind, 'trinket')
+        gear = [wares for _, _, wares in stock[3:-1]]
+        self.assertEqual(len(gear), 2)
+        for item in gear:  # the Upper Mines' better tiers, and something a rogue can use
+            self.assertIn(item.tier, (1, 2, 3))
+            self.assertTrue(game.fits(rogue, item))
+        self.assertTrue(labels[-1].startswith('Tome of '))
+
+    def test_gear_is_priced_by_tier(self):
+        party = party_of(hero())
+        for seed in range(20):
+            for _, price, wares in game.trader_stock(party, random.Random(seed)):
+                if isinstance(wares, game.Item) and wares.tier:
+                    self.assertEqual(price, game.GEAR_PRICES[wares.tier])
 
     def test_buying_spends_gold(self):
         warrior = hero()
         party = party_of(warrior)
         party.gold = 36
-        quietly(game.visit_trader, party, FakeRng(0, 0),
-                answers('bandage', "troll's blood vial", 'bandage', 'leave'))
+        stock = game.trader_stock(party, random.Random(0))
+        quietly(game.visit_trader, party, FakeRng(), answers('bandage', "troll's blood vial",
+                                                               'bandage', 'leave'), stock)
         self.assertEqual(party.bandages, game.START_BANDAGES + 2)
         self.assertEqual(warrior.trinket, game.ITEMS['trolls_blood'])
         self.assertEqual(party.gold, 36 - 8 - 20 - 8)
 
+    def test_bought_gear_goes_on_or_in_the_bag(self):
+        warrior = hero()
+        party = party_of(warrior)
+        party.gold = 200
+        stock = [('Firebrand Sword', 50, game.ITEMS['firebrand']),
+                 ('Fine Sword', 25, game.ITEMS['fine_sword'])]
+        quietly(game.visit_trader, party, FakeRng(), answers('firebrand sword', 'fine sword',
+                                                               'leave'), stock)
+        self.assertEqual(warrior.equipment['Weapon'], game.ITEMS['firebrand'])
+        self.assertEqual(party.bag, [game.ITEMS['fine_sword']])
+        self.assertEqual(party.gold, 200 - 50 - 25)
+
     def test_you_cannot_buy_what_you_cannot_afford(self):
         party = party_of(hero())
         party.gold = 5
-        _, out = captured(game.visit_trader, party, FakeRng(0, 0), answers('bandage', 'leave'))
+        _, out = captured(game.visit_trader, party, random.Random(0), answers('bandage', 'leave'))
         self.assertIn('That costs 8 gold', out)
         self.assertEqual(party.bandages, game.START_BANDAGES)
 
@@ -1052,46 +1081,165 @@ class TraderTests(unittest.TestCase):
         warrior = hero(skills=['Cleave'])
         party = party_of(warrior)
         party.gold = 45
-        stock = game.trader_stock(party, FakeRng(0, 0))
+        stock = game.trader_stock(party, random.Random(0))
         tome = stock[-1][0]
-        quietly(game.visit_trader, party, FakeRng(0, 0), answers(tome.lower(), 'leave'))
+        quietly(game.visit_trader, party, FakeRng(), answers(tome.lower(), 'leave'), stock)
         self.assertEqual(len(warrior.actions), 2)
         self.assertEqual(party.gold, 0)
 
     def test_selling_bag_items(self):
         party = party_of(hero())
         party.bag = [game.ITEMS['mithril_blade']]
-        quietly(game.visit_trader, party, FakeRng(0, 0), answers('sell', 'mithril blade', 'leave'))
+        quietly(game.visit_trader, party, random.Random(0),
+                answers('sell', 'mithril blade', 'leave'))
         self.assertEqual((party.bag, party.gold), ([], 3 * 6))
 
 
-class ForkTests(unittest.TestCase):
-    def test_the_fork_leads_where_you_choose(self):
-        party = party_of(hero())
-        stage = game.STAGES[0]
-        _, out = captured(game.fork, party, stage, 3, FakeRng(), answers('forge', 'leave'))
+class BoonWarmupTests(unittest.TestCase):
+    def test_boon_abilities_wait_two_rounds_into_each_fight(self):
+        wizard = hero('wizard', skills=['Meteor'], attack=1000)
+        _, out = captured(game.fight, party_of(wizard), kobold(), FakeRng(0),
+                          answers('meteor', 'attack'))
+        self.assertIn('not ready to use Meteor yet (2 more rounds)', out)
+
+    def test_after_two_rounds_they_are_ready(self):
+        wizard = hero('wizard', skills=['Meteor'])
+        party, monster = party_of(wizard), kobold(health=1000)
+        wizard.cooldowns = {'Meteor': game.BOON_WARMUP}
+        game.end_round(party), game.end_round(party)
+        turn(wizard, party, monster, [], 'meteor')
+        self.assertEqual(monster.health, 1000 - 2 * wizard.spell_power)
+
+    def test_basic_skills_are_ready_at_once(self):
+        warrior = hero(skills=['Cleave', 'Execute'], attack=1000)
+        _, out = captured(game.fight, party_of(warrior), kobold(), FakeRng(0), answers('cleave'))
+        self.assertIn('cleave', out)
+
+
+class HallTests(unittest.TestCase):
+    def setUp(self):
+        self.show = game.show
+        self.path = os.path.join(tempfile.mkdtemp(), 'hall.json')
+
+    def tearDown(self):
+        game.show = self.show
+
+    def finished_party(self):
+        party = party_of(hero('rogue', name='Vex'))
+        party.xp_earned, party.gold_found, party.cs = 300, 120, 12
+        party.rating_counts = {'Flawless': 2, 'Swift': 1}
+        party.stage, party.killer = 'Deep Warrens', 'Kobold Heavy'
+        party.members[0].health = 0
+        return party
+
+    def test_a_run_is_scored_on_xp_gold_ratings_and_the_dragon(self):
+        record = game.run_record(self.finished_party(), False)
+        self.assertEqual(record['score'], 300 + 120 + 3 * game.RATING_POINTS)
+        self.assertEqual((record['name'], record['job'], record['killer'], record['slain']),
+                         ('Vex', 'Rogue', 'Kobold Heavy', 12))
+        won = game.run_record(self.finished_party(), True)
+        self.assertEqual(won['score'], record['score'] + game.WIN_POINTS)
+        self.assertIn('slew Cinderjaw', game.run_summary(won))
+
+    def test_the_terminal_keeps_the_hall_in_a_file(self):
+        quietly(game.remember_run, self.finished_party(), False, self.path)
+        party = self.finished_party()
+        party.xp_earned = 5000
+        _, out = captured(game.remember_run, party, True, self.path)
+        self.assertEqual(len(game.load_hall(self.path)), 2)
+        self.assertIn('HALL OF LEGENDS', out)
+        self.assertIn(' 1.  5695  Vex, level 1 Rogue, slew Cinderjaw  <- this run', out)
+
+    def test_the_browser_keeps_its_own_hall(self):
+        scenes = []
+        game.show = lambda scene, **details: scenes.append((scene, details)) or True
+        quietly(game.remember_run, self.finished_party(), False, self.path)
+        self.assertEqual(scenes[0][0], 'record')
+        self.assertFalse(os.path.exists(self.path))
+
+    def test_the_hero_is_remembered_even_after_recruits_replace_them(self):
+        party = party_of(hero(name='Ada'), companion())
+        party.members[0].health = 0
+        party.members = party.living
+        self.assertEqual(game.run_record(party, False)['name'], 'Ada')
+
+    def test_a_fall_names_the_killer(self):
+        party = party_of(hero(health=1))
+        quietly(game.fight, party, kobold(attack=50), FakeRng(2, 0, -2), answers(), '', True)
+        self.assertEqual(party.killer, 'Test Kobold')
+
+
+class WayTests(unittest.TestCase):
+    # roll_on_table(WAYS) is a d20: 1-11 a fight, 12-15 a trader, 16-19 a tunnel, 20 a forge.
+
+    def test_the_way_leads_where_you_choose(self):
+        party, stage = party_of(hero()), game.STAGES[0]
+        # forge, tunnel, a fight (then its encounter roll: a heavy, after 3 kills);
+        # the forge, then the kobold beyond it (a miner)
+        (monster, intro, ambush), out = captured(game.choose_way, party, stage, 3,
+                                                 FakeRng(20, 16, 1, 10, 1),
+                                                 answers('left', 'leave'))
+        self.assertIn('Left: Forge.', out)
+        self.assertIn('Middle: Dark tunnel.', out)
+        self.assertIn('Right: Kobold Heavy. 142 HP', out)
         self.assertIn('Someone left this forge burning', out)
-        _, out = captured(game.fork, party, stage, 3, FakeRng(0, 0), answers('trader', 'leave'))
-        self.assertIn('Friends! Customers!', out)
+        self.assertEqual((monster.name, ambush), ('Kobold Miner', False))
+
+    def test_a_fight_you_can_see_is_the_one_you_get(self):
+        party, stage = party_of(hero()), game.STAGES[0]
+        monster, _, _ = quietly(game.choose_way, party, stage, 3, FakeRng(20, 16, 1, 10),
+                                answers('right'))
+        self.assertEqual(monster.name, 'Kobold Heavy')
+
+    def test_after_the_last_kobold_a_fight_is_the_lair(self):
+        party, stage = party_of(hero()), game.STAGES[0]
+        # a fight becomes the lair; a second is rerolled, as is a second forge
+        ways = game.roll_ways(party, stage, stage.fights, FakeRng(1, 1, 20, 20, 16))
+        self.assertEqual([way.kind for way in ways], ['lair', 'forge', 'tunnel'])
+        self.assertEqual(ways[0].monster, stage.boss)
+        # every way leads to the boss: a detour, then the lair
+        monster, _, _ = quietly(game.choose_way, party, stage, stage.fights,
+                                FakeRng(1, 20, 20, 16), answers('middle', 'leave'))
+        self.assertTrue(monster.boss)
+
+    def test_ways_can_repeat_but_traders_each_have_their_own_wares(self):
+        party = party_of(hero())
+        kinds = set()
+        for seed in range(200):
+            ways = game.roll_ways(party, game.STAGES[1], 2, random.Random(seed))
+            kinds.update(way.kind for way in ways)
+            self.assertLessEqual([way.kind for way in ways].count('forge'), 1)
+            for way in ways:
+                if way.kind == 'trader':
+                    self.assertIn('Selling', way.describe()[1])
+            traders = [way for way in ways if way.kind == 'trader']
+            if len(traders) == 2 and traders[0].stock != traders[1].stock:
+                kinds.add('two traders, different wares')
+        self.assertEqual(kinds, {'fight', 'trader', 'tunnel', 'forge',
+                                 'two traders, different wares'})
 
     def test_the_dark_tunnel_can_hide_a_cache(self):
         party = party_of(hero())
         # cache roll, then common loot: a trinket (rolls 6-7), the first one
-        quietly(game.dark_tunnel, party, game.STAGES[0], 3, FakeRng(1, 6, 0), answers())
-        self.assertEqual(party.gold, 20)
+        ambusher = quietly(game.dark_tunnel, party, game.STAGES[0], FakeRng(1, 6, 0))
+        self.assertIsNone(ambusher)
+        self.assertEqual((party.gold, party.gold_found), (20, 20))
         self.assertIsNotNone(party.members[0].trinket)
 
     def test_the_dark_tunnel_can_be_an_ambush(self):
+        party, stage = party_of(hero()), game.STAGES[0]
+        # three tunnels; the ambush roll, then the deepest table's roll (a miner)
+        monster, intro, ambush = quietly(game.choose_way, party, stage, 3,
+                                         FakeRng(16, 16, 16, 2, 5), answers('left'))
+        self.assertEqual((monster.name, intro, ambush), ('Kobold Miner', game.TRAP, True))
+
+    def test_ambushers_strike_first(self):
         party = party_of(hero(attack=1000))
-        # ambush roll, encounter roll on the stage's deepest table (a miner), its free
-        # strike (no ability; damage, dodge), one blow; then XP, gold and the bandage
-        # roll, but no camp to search; and no bandage used on the wound
-        won_out = captured(game.dark_tunnel, party, game.STAGES[0], 3,
-                           FakeRng(2, 5, 2, 0, -2, 0, 2), answers('attack', 'no'))[1]
-        self.assertIn('they strike first', won_out)
-        self.assertIn('You are struck', won_out)
-        self.assertNotIn('search the kobolds camp', won_out)
-        self.assertEqual(party.cs, 1)
+        # its free strike (no ability; damage, dodge), then one blow
+        won, out = captured(game.fight, party, game.spawn('kobold_miner'), FakeRng(2, 0, -2, 0),
+                            answers('attack'), game.TRAP, True)
+        self.assertTrue(won)
+        self.assertLess(out.index('You are struck'), out.index('You strike'))
 
 
 class VictoryTests(unittest.TestCase):
@@ -1180,8 +1328,9 @@ class FlowTests(unittest.TestCase):
         party = party_of(warrior)
         # encounter: miner; one hit; tier 1 gear, the Fine Shield, which the hero takes;
         # a bandage drop; then the boss, who drops the Junk Crown
-        won = quietly(game.play, party, FakeRng(5, 0, 8, 1, 1, 0),
-                      answers('attack', 'no', 'attack'))
+        # then the way on: the lair (rolled 1), a forge and a tunnel
+        won = quietly(game.play, party, FakeRng(5, 0, 8, 1, 1, 1, 20, 16, 0),
+                      answers('attack', 'no', 'left', 'attack'))
         self.assertTrue(won)
         self.assertEqual(party.cs, 2)
         self.assertEqual(warrior.max_health, 175)
@@ -1291,10 +1440,10 @@ class BalanceBotTests(unittest.TestCase):
 
     def test_the_bot_plays_whole_runs_of_every_class(self):
         for job_key in game.JOBS:
-            for seed in range(3):
-                for hoard, fork in ((False, 'Forge'), (True, 'Trader'), (False, 'Tunnel')):
-                    won, death = balance_bot.play_run(job_key, seed, hoard, fork)
-                    self.assertTrue(won or death, (job_key, seed, hoard, fork))
+            for seed in range(4):
+                for hoard in (False, True):
+                    won, record = balance_bot.play_run(job_key, seed, hoard)
+                    self.assertTrue(won or record['killer'], (job_key, seed, hoard))
 
     def test_runs_are_repeatable(self):
         self.assertEqual(balance_bot.play_run('wizard', 7), balance_bot.play_run('wizard', 7))

@@ -1,5 +1,7 @@
 """Kobold Cave: a small text-based RPG."""
 
+import json
+import os
 import random
 from dataclasses import dataclass, field, replace
 
@@ -14,6 +16,7 @@ BAG_SIZE = 8  # spare items the party can carry; the oldest falls out when it's 
 FORGE_LIMIT = 3  # how many times one item can be reforged
 LEVEL_XP = (0, 50, 120, 220, 350, 520, 720, 950)  # total XP needed to reach each level
 SKILL_LEVELS = (2, 4)  # level-ups that also teach a basic skill (1 of 2 offered)
+BOON_WARMUP = 2  # rounds at the start of each fight before Boon Abilities can be used
 
 
 def debug(message):
@@ -350,6 +353,15 @@ class Party:
     rating_counts: dict = field(default_factory=dict)  # 'Flawless' -> wins rated so, for the notes
     smoke: bool = False  # Smoke Bomb: every strike misses this round
     shielded: bool = False  # Arcane Shield: damage is halved this round
+    # For the record of the run (see run_record)
+    hero: object = None  # the player's own character, even after they fall
+    xp_earned: int = 0
+    gold_found: int = 0  # gold picked up, whatever was spent
+    killer: str = ''  # the enemy the party fell to
+    recruits: list = field(default_factory=list)  # 'Vex the Rogue', for everyone who joined
+
+    def __post_init__(self):
+        self.hero = self.hero or next((m for m in self.members if m.hero), None)
 
     @property
     def living(self):
@@ -669,7 +681,6 @@ def spawn(monster_key):
 class Stage:
     name: str
     fights: int  # kobolds to slay before the boss
-    forks: tuple  # after this many kills the tunnel splits (forge, trader, dark tunnel)
     encounters: tuple  # (kills so far below this, table) pairs, checked in order
     boss: str
     loot: dict  # 'common' / 'rare' -> table of None (empty), 'trinket' or a gear tier
@@ -686,7 +697,7 @@ LOWER_WARREN_ENCOUNTERS = ((2, 'kobold_guard'), (5, 'kobold_heavy'), (3, 'kobold
 HOARD_ENCOUNTERS = ((3, 'kobold_heavy'), (3, 'kobold_shaman'), (4, 'kobold_dragonguard'))
 
 STAGES = (
-    Stage('Upper Mines', fights=8, forks=(3, 6),
+    Stage('Upper Mines', fights=8,
           encounters=((3, SHALLOW_ENCOUNTERS), (5, MIDDLE_ENCOUNTERS), (99, DEEP_ENCOUNTERS)),
           boss='kobold_leader',
           loot={'common': ((5, None), (2, 'trinket'), (9, 1), (4, 2)),
@@ -695,7 +706,7 @@ STAGES = (
           boss_intro='The tunnel opens into a torch-lit chamber. Atop a throne of stolen junk '
                      'sits the Kobold Leader, who does not look happy to see you.',
           boss_outro='The Kobold Leader collapses onto his pile of junk.'),
-    Stage('Deep Warrens', fights=8, forks=(3, 6),
+    Stage('Deep Warrens', fights=8,
           encounters=((4, WARREN_ENCOUNTERS), (99, LOWER_WARREN_ENCOUNTERS)),
           boss='kobold_warchief',
           loot={'common': ((5, None), (3, 'trinket'), (8, 2), (4, 3)),
@@ -706,7 +717,7 @@ STAGES = (
                      'dragging an axe bigger than he is.',
           boss_outro='The Warchief topples. Somewhere far below, something enormous rolls '
                      'over in its sleep.'),
-    Stage('The Hoard', fights=6, forks=(3,),
+    Stage('The Hoard', fights=6,
           encounters=((99, HOARD_ENCOUNTERS),),
           boss='red_dragon',
           loot={'common': ((5, None), (3, 'trinket'), (8, 3), (4, 4)),
@@ -1426,8 +1437,8 @@ def take_turn(member, party, monster, rng, ask):
         waiting = member.cooldowns.get(action.name)
         if waiting:
             rounds = f'{waiting} more round{"s" if waiting > 1 else ""}'
-            narrate(member, f'You are not ready to use {action.name} again ({rounds}).',
-                    f'{{name}} is not ready to use {action.name} again ({rounds}).')
+            narrate(member, f'You are not ready to use {action.name} yet ({rounds}).',
+                    f'{{name}} is not ready to use {action.name} yet ({rounds}).')
             continue
         if member.mana < action.mana:
             narrate(member, 'You reach for your magic and find nothing left. You are out of mana.',
@@ -1456,16 +1467,21 @@ def fight(party, monster, rng=random, ask=input, intro='', ambush=False):
     else:
         print(f'{monster.name} blocks your path. What will you do?')
     for member in party.members:
-        member.cooldowns, member.used = {}, set()
+        # Boon Abilities take a couple of rounds to gather, so they can't
+        # open every fight.
+        member.cooldowns = {name: BOON_WARMUP for name in member.actions
+                            if name in member.job.boon_abilities}
+        member.used = set()
         member.rallied = member.last_stand = member.hexed = member.burning = member.reeling = 0
         member.bloodied = False
     party.in_fight = True
     try:
         if ambush:
             monster_turn(party, monster, 0, rng)
-            if not party.alive:
-                return False
-        return fight_rounds(party, monster, rng, ask)
+        won = party.alive and fight_rounds(party, monster, rng, ask)
+        if not party.alive:
+            party.killer = monster.name
+        return won
     finally:
         party.in_fight = False
 
@@ -1573,6 +1589,7 @@ def award_xp(party, monster, rng=random, ask=input, bonus=0):
     if not xp:
         return []
     print(f'The party earns {xp} XP.')
+    party.xp_earned += xp
     levelled = []
     for member in party.living:
         member.xp += xp
@@ -1665,6 +1682,7 @@ def boss_reward(party, stage_index, rng=random, ask=input):
         if answer in recruits:
             recruit = recruits[answer]
             party.members = party.living + [recruit]
+            party.recruits.append(f'{recruit.name} the {recruit.job.name}')
             print(f'{recruit.name} the {recruit.job.name} joins your party. '
                   'They seem almost grateful. Almost.')
             for relic in party.relics:  # full trophy sets count for newcomers too
@@ -1681,18 +1699,20 @@ def clear_stage(party, stage, rng=random, ask=input):
         print(stage.arrival)
     show_party('explore', party)
     kills = party.kills = 0
-    while party.alive and kills < stage.fights:
-        monster = spawn(roll_on_table(encounter_table(stage, kills), rng))
-        if fight(party, monster, rng, ask):
-            kills += 1
-            party.kills = kills
-            after_victory(party, monster, rng, ask)
-            if party.alive and kills in stage.forks:
-                fork(party, stage, kills, rng, ask)
-    if not party.alive:
-        return False
+    # The first kobold is waiting at the bottom of the ladder; after every
+    # fight the tunnel splits and you choose the way on, until it leads to
+    # the boss.
+    first = roll_on_table(encounter_table(stage, kills), rng) if stage.fights else stage.boss
+    monster, intro, ambush = spawn(first), '', False
+    while not monster.boss:
+        if fight(party, monster, rng, ask, intro=intro, ambush=ambush):
+            kills = party.kills = min(kills + 1, stage.fights)  # an ambush at the end is extra
+            after_victory(party, monster, rng, ask, camp=not ambush)
+        if not party.alive:
+            return False
+        monster, intro, ambush = choose_way(party, stage, kills, rng, ask)
+    boss = monster
 
-    boss = spawn(stage.boss)
     if not fight(party, boss, rng, ask, intro=stage.boss_intro):
         return False
     party.cs += 1
@@ -1859,6 +1879,7 @@ def claim_trophy(party, monster, ratings):
 def collect_gold(party, monster):
     if monster.gold:
         party.gold += monster.gold
+        party.gold_found += monster.gold
         print(f'You pick {monster.gold} gold off the body. Gold: {party.gold}')
     return monster.gold
 
@@ -1900,7 +1921,97 @@ def usable_bag_items(party):
             if any(slots_for(member, item) for member in party.living)]
 
 
-# --- Forks: the forge, the trader and the dark tunnel ----------------------
+# --- The way on: after every fight the tunnel splits three ways -----------
+# Each way is a fight (you can see what waits there), a trader, a dark tunnel
+# or, now and then, a forge. A detour still ends in a fight: whatever is past
+# it is waiting. Two ways can be alike, but each trader has his own wares.
+
+WAYS = ((11, 'fight'), (4, 'trader'), (4, 'tunnel'), (1, 'forge'))  # forges are rare
+SIDES = ('Left', 'Middle', 'Right')
+GEAR_PRICES = {1: 25, 2: 50, 3: 85, 4: 130}  # what traders ask for gear, by tier
+TRAP = 'The tunnel was a trap. Kobolds pour out of the walls, and they strike first!'
+
+
+@dataclass
+class Way:
+    kind: str  # 'fight', 'lair' (the boss), 'trader', 'tunnel' or 'forge'
+    monster: str = ''  # BESTIARY key, for a fight or the lair
+    stock: list = field(default_factory=list)  # a trader's wares, see trader_stock
+
+    def describe(self):
+        """A title and a line about what's down this way."""
+        if self.kind in ('fight', 'lair'):
+            monster = BESTIARY[self.monster]
+            if self.kind == 'lair':
+                return monster.name, 'Its lair. Straight to the fight.'
+            loot = ' Its camp looks worth searching.' if monster.loot_tier == 'rare' else ''
+            return monster.name, f'{monster.health} HP, hits for about {monster.attack}.{loot}'
+        if self.kind == 'trader':
+            # Every trader has bandages and a vial; say what's special about this one.
+            wares = [label for label, _, wares in self.stock[2:]]
+            return 'Trader', f'Lantern light and haggling. Selling {", ".join(wares)}.'
+        if self.kind == 'forge':
+            return 'Forge', 'The ring of a hammer. Break gear into scrap, reforge what you wear.'
+        return 'Dark tunnel', 'Could be a forgotten cache. Could be teeth.'
+
+    def sprite(self):
+        if self.kind in ('fight', 'lair'):
+            return BESTIARY[self.monster].name
+        return {'trader': 'trader', 'forge': 'anvil'}.get(self.kind, 'tunnel')
+
+
+def roll_ways(party, stage, kills, rng=random):
+    """Three ways on. Once the stage's kobolds are beaten, a fight is the
+    boss's lair instead, and every detour leads there too."""
+    boss_next = kills >= stage.fights
+    ways = []
+    while len(ways) < len(SIDES):
+        kind = roll_on_table(WAYS, rng)
+        if kind == 'fight' and boss_next:
+            kind = 'lair'
+        if kind in ('lair', 'forge') and any(way.kind == kind for way in ways):
+            continue  # one of these is plenty
+        if kind == 'fight':
+            ways.append(Way(kind, roll_on_table(encounter_table(stage, kills), rng)))
+        elif kind == 'lair':
+            ways.append(Way(kind, stage.boss))
+        elif kind == 'trader':
+            ways.append(Way(kind, stock=trader_stock(party, rng)))
+        else:
+            ways.append(Way(kind))
+    return ways
+
+
+def choose_way(party, stage, kills, rng=random, ask=input):
+    """Pick a way on, and go through any detour. Returns the fight that
+    waits at the end of it: (monster, intro, ambush)."""
+    ways = roll_ways(party, stage, kills, rng)
+    print('')
+    print('The tunnel splits three ways.' if kills < stage.fights else
+          f'The kobolds thin out. Somewhere ahead is {BESTIARY[stage.boss].name}.')
+    for side, way in zip(SIDES, ways):
+        title, text = way.describe()
+        print(f'  {side}: {title}. {text}')
+    show_party('fork', party, ways=[{'side': side, 'kind': way.kind, 'title': way.describe()[0],
+                                     'text': way.describe()[1], 'sprite': way.sprite()}
+                                    for side, way in zip(SIDES, ways)])
+    way = ways[SIDES.index(choose(ask, 'Which way?', list(SIDES)))]
+    if way.kind in ('fight', 'lair'):
+        return spawn(way.monster), '', False
+    if way.kind == 'forge':
+        visit_forge(party, ask)
+    elif way.kind == 'trader':
+        visit_trader(party, rng, ask, way.stock)
+    else:
+        ambusher = dark_tunnel(party, stage, rng)
+        if ambusher:
+            return ambusher, TRAP, True
+    show_party('explore', party)
+    print('-----------------------------------------------------')
+    beyond = stage.boss if kills >= stage.fights else \
+        roll_on_table(encounter_table(stage, kills), rng)
+    return spawn(beyond), '', False
+
 
 REFORGE = {  # what each reforge adds, by kind of item
     'sword': {'attack': 4},
@@ -1994,13 +2105,23 @@ def visit_forge(party, ask=input):
 
 
 def trader_stock(party, rng):
-    """What the trader has today: (label, price, what it is) triples."""
+    """What a trader has: (label, price, what it is) triples. Bandages and a
+    vial always; a trinket, two pieces of gear from the stage's better tiers
+    and a skill tome, each for someone in the party."""
     stock = [('Bandage', 8, 'bandage'), ("Troll's Blood Vial", 20, ITEMS['trolls_blood'])]
-    trinkets = [item for item in TRINKETS if item.effect != 'vial'
-                and any(fits(member, item) for member in party.living)]
+    usable = lambda item: any(fits(member, item) for member in party.living)
+    trinkets = [item for item in TRINKETS if item.effect != 'vial' and usable(item)]
     if trinkets:
         trinket = pick(trinkets, rng)
         stock.append((trinket.name, 30, trinket))
+    tiers = [tier for _, tier in STAGES[party.depth].loot['rare'] if isinstance(tier, int)]
+    for _ in range(2):
+        tier = pick(tiers, rng)
+        gear = [item for item in GEAR if item.tier == tier and usable(item)
+                and all(item is not wares for _, _, wares in stock)]
+        if gear:
+            item = pick(gear, rng)
+            stock.append((item.name, GEAR_PRICES[tier], item))
     students = [member for member in party.living
                 if any(name not in member.actions for name in member.job.skills)]
     if students:
@@ -2010,9 +2131,11 @@ def trader_stock(party, rng):
     return stock
 
 
-def visit_trader(party, rng=random, ask=input):
+def visit_trader(party, rng=random, ask=input, stock=None):
+    """Each trader has his own wares: pass the stock shown on the way here,
+    or he rolls some."""
     print('A kobold with an enormous pack waves you over. "Friends! Customers! Same thing!"')
-    stock = trader_stock(party, rng)
+    stock = stock or trader_stock(party, rng)
     while True:
         for label, price, wares in stock:
             note = f' (teaches {wares[0].name} {wares[1]})' if isinstance(wares, tuple) else ''
@@ -2067,41 +2190,20 @@ def visit_trader(party, rng=random, ask=input):
             take(party, wares)
 
 
-def dark_tunnel(party, stage, kills, rng=random, ask=input):
-    """Half the time a hidden cache, half the time an ambush: the kobold
-    strikes first, but beating it pays out like any other fight."""
+def dark_tunnel(party, stage, rng=random):
+    """Half the time a hidden cache; half the time an ambush by one of the
+    stage's toughest kobolds, which is returned to be fought."""
     if rng.randint(1, 2) == 1:
         gold = 20 + 15 * party.depth
         party.gold += gold
+        party.gold_found += gold
         print(f'At the end of the tunnel is a forgotten cache: {gold} gold. Gold: {party.gold}')
         item = roll_loot(party.living, stage.loot['common'], rng)
         if item:
             print(f'Under the coins lies a [{item.name}] ({item.describe()}).')
             take(party, item)
-        return
-    # Ambushers come from the stage's toughest kobolds.
-    monster = spawn(roll_on_table(stage.encounters[-1][1], rng))
-    trap = 'The tunnel was a trap. Kobolds pour out of the walls, and they strike first!'
-    if fight(party, monster, rng, ask, intro=trap, ambush=True):
-        after_victory(party, monster, rng, ask, camp=False)
-
-
-def fork(party, stage, kills, rng=random, ask=input):
-    print('')
-    print('The tunnel splits three ways.')
-    print('  Left: the ring of a hammer on an anvil. A forge.')
-    print('  Middle: lantern light and haggling. A kobold trader.')
-    print('  Right: a dark, narrow tunnel. Could be treasure. Could be teeth.')
-    show_party('fork', party)
-    way = choose(ask, 'Which way?', ['Forge', 'Trader', 'Tunnel'])
-    if way == 'Forge':
-        visit_forge(party, ask)
-    elif way == 'Trader':
-        visit_trader(party, rng, ask)
-    else:
-        dark_tunnel(party, stage, kills, rng, ask)
-    show_party('explore', party)
-    print('-----------------------------------------------------')
+        return None
+    return spawn(roll_on_table(stage.encounters[-1][1], rng))
 
 
 def claim_boss_drop(party, boss, ask=input):
@@ -2170,6 +2272,63 @@ def play(party, rng=random, ask=input):
     return True
 
 
+# --- The hall of legends: every run is remembered --------------------------
+
+HALL_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'kobold_cave_hall.json')
+HALL_SIZE = 100  # runs the terminal keeps
+RATING_POINTS = 25  # score for each Flawless, Swift or Overkill win
+WIN_POINTS = 500
+
+
+def run_record(party, won):
+    """What the hall remembers of a run. The score is the XP earned, the
+    gold found, a little for every rated win and a lot for slaying the dragon."""
+    hero, ratings = party.hero, sum(party.rating_counts.values())
+    return {'name': hero.name, 'job': hero.job.name, 'level': hero.level,
+            'recruits': list(party.recruits), 'won': won, 'stage': party.stage,
+            'depth': party.depth, 'killer': party.killer, 'slain': party.cs,
+            'gold': party.gold_found, 'ratings': ratings,
+            'score': party.xp_earned + party.gold_found + RATING_POINTS * ratings
+                     + (WIN_POINTS if won else 0)}
+
+
+def run_summary(run):
+    end = 'slew Cinderjaw' if run['won'] else f"fell to the {run['killer']} in the {run['stage']}"
+    return f"{run['name']}, level {run['level']} {run['job']}, {end}"
+
+
+def load_hall(path=HALL_FILE):
+    try:
+        with open(path) as file:
+            runs = json.load(file)
+        return runs if isinstance(runs, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def remember_run(party, won, path=HALL_FILE):
+    """Put the run in the hall and show where it placed. The browser keeps
+    its own hall; the terminal keeps one in a file next to the game."""
+    record = run_record(party, won)
+    if show('record', run=record):
+        return
+    runs = load_hall(path)[-(HALL_SIZE - 1):] + [record]
+    try:
+        with open(path, 'w') as file:
+            json.dump(runs, file, indent=1)
+    except OSError:
+        print('(The hall of legends could not be saved.)')
+    best = sorted(runs, key=lambda run: -run['score'])
+    print('')
+    print('HALL OF LEGENDS')
+    for rank, run in enumerate(best[:5], 1):
+        mark = '  <- this run' if run is record else ''
+        print(f"{rank:>2}. {run['score']:>5}  {run_summary(run)}{mark}")
+    if record not in best[:5]:
+        print(f'This run scored {record["score"]}, '
+              f'{best.index(record) + 1} of the {len(runs)} in the hall.')
+
+
 def main():
     name = input('Hello traveller, you are about to enter the Kobold Mines. '
                  'Before you venture in and probably die would you share your name? ')
@@ -2189,7 +2348,7 @@ def main():
     print('As you venture into the cavern the light from the entrance fades from view. '
           'In front of you is 3 branching paths. You take the one that smells least of '
           'kobold. They all smell of kobold.')
-    play(party)
+    remember_run(party, play(party))
 
 
 if __name__ == '__main__':
