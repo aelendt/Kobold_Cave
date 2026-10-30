@@ -560,11 +560,13 @@ def rest(party):
 
 
 def offer_bandages(party, ask=input):
-    """Between fights, let the player patch up whoever is hurt."""
+    """Between fights, let the player patch up whoever is hurt. Returns True
+    if a question was asked."""
+    asked = False
     while party.bandages:
         hurt = [member for member in party.living if member.health < member.max_health]
         if not hurt:
-            return
+            return asked
         # On your own it's a yes/no question; in a party you pick who.
         if len(party.members) == 1:
             options = {'Yes': hurt[0]}
@@ -572,9 +574,10 @@ def offer_bandages(party, ask=input):
             options = {member.name: member for member in hurt}
         menu = ' / '.join(list(options) + ['No'])
         answer = ask(f'Use a bandage? ({party.bandages} left) [{menu}] ').strip().lower()
+        asked = True
         options = {label.lower(): member for label, member in options.items()}
         if answer == 'no':
-            return
+            return asked
         if answer not in options:
             print('Please select a valid option.')
             continue
@@ -585,6 +588,7 @@ def offer_bandages(party, ask=input):
         narrate(member, f'You bind your wounds and recover {healed} HP.',
                 f'You bind {{name}}\'s wounds. They recover {healed} HP.')
         show_party('explore', party)
+    return asked
 
 
 # --- Monsters -------------------------------------------------------------
@@ -1428,9 +1432,13 @@ def take_turn(member, party, monster, rng, ask):
         return result == FLED
 
 
-def fight(party, monster, rng=random, ask=input):
-    """Returns True if the monster was slain, False if the party fled or fell."""
+def fight(party, monster, rng=random, ask=input, intro='', ambush=False):
+    """Returns True if the monster was slain, False if the party fled or fell.
+    An intro is printed first; in an ambush the monster strikes first."""
+    show_party('encounter', party, monster)  # the browser starts a new log block
     print('')
+    if intro:
+        print(intro)
     if monster.called.startswith('the '):
         print(f'You have encountered a {monster.name}. What will you do?')
     else:
@@ -1440,6 +1448,10 @@ def fight(party, monster, rng=random, ask=input):
         member.rallied = member.last_stand = member.hexed = member.burning = member.reeling = 0
     party.in_fight = True
     try:
+        if ambush:
+            monster_turn(party, monster, 0, rng)
+            if not party.alive:
+                return False
         return fight_rounds(party, monster, rng, ask)
     finally:
         party.in_fight = False
@@ -1654,10 +1666,8 @@ def clear_stage(party, stage, rng=random, ask=input):
     if not party.alive:
         return False
 
-    print('')
-    print(stage.boss_intro)
     boss = spawn(stage.boss)
-    if not fight(party, boss, rng, ask):
+    if not fight(party, boss, rng, ask, intro=stage.boss_intro):
         return False
     party.cs += 1
     show_party('aftermath', party, boss)
@@ -1696,10 +1706,22 @@ def after_victory(party, monster, rng=random, ask=input, camp=True):
     drawn = show_party('spoils', party, spoils={
         'monster': monster.name, 'xp': monster.xp, 'levelled': levelled, 'gold': gold,
         'found': found, 'bandages': bandages, 'healing': healing})
-    offer_bandages(party, ask)
+    asked = offer_bandages(party, ask)
     if party.bag_changed and not drawn:
         open_bag(party, ask)
+    elif party.bag_changed:
+        # Gear can only be changed between fights, so when new gear went in
+        # the bag, stop for a moment (a bandage question already did).
+        if not asked and usable_bag_items(party):
+            choose(ask, 'New gear went in the bag. Equip it from the party panel, or',
+                   ['Press on'])
+        party.bag_changed = False
     print('-----------------------------------------------------')
+
+
+def usable_bag_items(party):
+    return [item for item in party.bag
+            if any(slots_for(member, item) for member in party.living)]
 
 
 # --- Forks: the forge, the trader and the dark tunnel ----------------------
@@ -1881,11 +1903,10 @@ def dark_tunnel(party, stage, kills, rng=random, ask=input):
             print(f'Under the coins lies a [{item.name}] ({item.describe()}).')
             take(party, item)
         return
-    print('The tunnel was a trap. Kobolds pour out of the walls, and they strike first!')
     # Ambushers come from the stage's toughest kobolds.
     monster = spawn(roll_on_table(stage.encounters[-1][1], rng))
-    monster_turn(party, monster, 0, rng)
-    if party.alive and fight(party, monster, rng, ask):
+    trap = 'The tunnel was a trap. Kobolds pour out of the walls, and they strike first!'
+    if fight(party, monster, rng, ask, intro=trap, ambush=True):
         after_victory(party, monster, rng, ask, camp=False)
 
 

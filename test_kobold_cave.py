@@ -1135,7 +1135,7 @@ class ShowHookTests(unittest.TestCase):
     def test_combat_scenes_carry_the_party_and_enemy(self):
         party = party_of(hero('wizard', attack=200), companion())
         quietly(game.fight, party, kobold(), FakeRng(0), answers('attack'))
-        scene, details = self.scenes[0]
+        scene, details = self.scenes[1]  # after the 'encounter' that opens every fight
         self.assertEqual(scene, 'combat')
         details = json.loads(details)
         self.assertEqual([member['name'] for member in details['party']], ['Test', 'Mira'])
@@ -1184,6 +1184,21 @@ class ShowHookTests(unittest.TestCase):
         self.assertEqual(party.gold, 6)
         # The fight's end is marked first, so the log can start a fresh block.
         self.assertEqual(self.scenes[0][0], 'aftermath')
+
+    def test_fights_start_with_an_encounter_scene(self):
+        quietly(game.fight, party_of(hero(attack=1000)), kobold(), FakeRng(0), answers('attack'))
+        self.assertEqual(self.scenes[0][0], 'encounter')
+
+    def test_new_gear_in_the_bag_pauses_before_the_next_fight(self):
+        party = party_of(hero())
+        game.equip(party.members[0], 'Shield', game.ITEMS['fine_shield'])
+        quietly(game.stow, party, game.ITEMS['thick_shield'])
+        # No loot and no bandages, and nobody hurt: only the pause asks anything.
+        quietly(game.after_victory, party, game.spawn('kobold_guard'), FakeRng(5, 2),
+                answers('press on'))
+        self.assertFalse(party.bag_changed)
+        # Nothing new since: the next win doesn't stop (answers() would run dry).
+        quietly(game.after_victory, party, game.spawn('kobold_guard'), FakeRng(5, 2), answers())
 
     def test_the_panel_shows_how_often_gear_was_reforged(self):
         warrior = hero()

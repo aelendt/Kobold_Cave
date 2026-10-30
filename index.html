@@ -233,6 +233,7 @@ h1 {
 }
 #log .system { color: var(--dust-dim); font-style: italic; }
 #log .chapter { color: var(--gold); font: 400 1.2rem/1.3 var(--font-display); margin-bottom: 0.3rem; }
+#log .chapter.fight { color: var(--blood); }
 /* --- Spoils pop-up (showSpoils in scene.js) --- */
 #spoils-dialog {
   width: min(24rem, calc(100vw - 32px));
@@ -547,7 +548,7 @@ function addLine(text, cls = classify(text)) {
   if (cls === 'panel' && !document.getElementById('scene').hidden) return;
   if (!turn) newTurn();
   // The game prints a blank line after each answer; at the top of a turn it's just a gap.
-  if (!text && turn.lastElementChild?.classList.contains('answer')) return;
+  if (!text && turn.lastElementChild?.matches('.answer, .chapter')) return;
   const p = document.createElement('p');
   p.className = `${cls} new`.trim();
   // Item names are printed in [brackets]; give them the loot colour.
@@ -614,10 +615,11 @@ let resolveAnswer = null;
 window.drawScene = function (scene, json) {
   const details = JSON.parse(json);
   enqueue(() => {
-    // A fight just ended: what follows gets its own block in the log.
-    if (scene === 'aftermath') {
+    // Fights start and end new blocks in the log, so each one stands apart.
+    if (scene === 'encounter' || scene === 'aftermath') {
       newTurn();
-      addLine(`${details.enemy.name} defeated`, 'chapter');
+      addLine(scene === 'encounter' ? details.enemy.name : `${details.enemy.name} defeated`,
+              scene === 'encounter' ? 'chapter fight' : 'chapter');
     }
     // 'inventory' only refreshes the panels after an Equip; the battle panel stays.
     if (scene !== 'inventory') showScene(scene, details, { pick: submit });
