@@ -3,6 +3,7 @@
 import json
 import os
 import random
+import urllib.parse
 from dataclasses import dataclass, field, replace
 
 DEBUG = False  # set to True to see every dice roll
@@ -355,8 +356,10 @@ class Party:
     shielded: bool = False  # Arcane Shield: damage is halved this round
     # For the record of the run (see run_record)
     hero: object = None  # the player's own character, even after they fall
-    xp_earned: int = 0
     gold_found: int = 0  # gold picked up, whatever was spent
+    bosses: int = 0  # bosses slain
+    hoards: int = 0  # hoards kept instead of freeing a prisoner
+    fled: int = 0  # fights run away from
     killer: str = ''  # the enemy the party fell to
     recruits: list = field(default_factory=list)  # 'Vex the Rogue', for everyone who joined
 
@@ -1481,6 +1484,8 @@ def fight(party, monster, rng=random, ask=input, intro='', ambush=False):
         won = party.alive and fight_rounds(party, monster, rng, ask)
         if not party.alive:
             party.killer = monster.name
+        elif not won:
+            party.fled += 1
         return won
     finally:
         party.in_fight = False
@@ -1589,7 +1594,6 @@ def award_xp(party, monster, rng=random, ask=input, bonus=0):
     if not xp:
         return []
     print(f'The party earns {xp} XP.')
-    party.xp_earned += xp
     levelled = []
     for member in party.living:
         member.xp += xp
@@ -1678,6 +1682,7 @@ def boss_reward(party, stage_index, rng=random, ask=input):
         answer = answer.strip().lower()
         if answer in hoard:
             power_up(leader, hoard[answer])
+            party.hoards += 1
             return
         if answer in recruits:
             recruit = recruits[answer]
@@ -1716,6 +1721,7 @@ def clear_stage(party, stage, rng=random, ask=input):
     if not fight(party, boss, rng, ask, intro=stage.boss_intro):
         return False
     party.cs += 1
+    party.bosses += 1
     show_party('aftermath', party, boss)
     print('')
     print(stage.boss_outro)
@@ -2272,24 +2278,71 @@ def play(party, rng=random, ask=input):
     return True
 
 
-# --- The hall of legends: every run is remembered --------------------------
+# --- The hall of legends: every run is remembered and graded ------------
+# A run's grade adds up everything it did: how far it got, how it won its
+# fights, how strong the hero grew, and how hard it made things for itself.
+# The grade sets its tier. The terminal keeps runs in a file; the browser
+# keeps its own. Either can send a run to the shared leaderboard (see
+# leaderboard.py), which grades it again from the same facts.
 
 HALL_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'kobold_cave_hall.json')
 HALL_SIZE = 100  # runs the terminal keeps
-RATING_POINTS = 25  # score for each Flawless, Swift or Overkill win
-WIN_POINTS = 500
+LEADERBOARD_REPO = 'aelendt/Kobold_Cave'
+TIERS = ((500, 'Legend'), (400, 'Grandmaster'), (300, 'Master'), (200, 'Gold'),
+         (100, 'Silver'), (0, 'Bronze'))
+
+
+def grade_parts(run):
+    """What each part of a run is worth, as (label, points) pairs, from the
+    facts in its record. Parts worth nothing are left out."""
+    # Getting far counts, but it's how the fights were won (the ratings),
+    # the trophy sets and going on alone that set great runs apart.
+    parts = [('Kobolds slain', 3 * run['slain']),
+             ('Bosses slain', 20 * run['bosses']),
+             ('Slew Cinderjaw', 20 * run['won']),
+             ('Rated wins', 4 * run['ratings']),
+             ('Trophy sets', 12 * run['relics']),
+             ('Hero level', 4 * (run['level'] - 1)),
+             ('Gold found', run['gold'] // 25),
+             ('Kept the hoard', 30 * run['hoards']),
+             ('Fled', -5 * run['fled'])]
+    return [(label, points) for label, points in parts if points]
+
+
+def run_grade(run):
+    return max(0, sum(points for _, points in grade_parts(run)))
+
+
+def tier_of(grade):
+    return next(name for floor, name in TIERS if grade >= floor)
 
 
 def run_record(party, won):
-    """What the hall remembers of a run. The score is the XP earned, the
-    gold found, a little for every rated win and a lot for slaying the dragon."""
-    hero, ratings = party.hero, sum(party.rating_counts.values())
-    return {'name': hero.name, 'job': hero.job.name, 'level': hero.level,
-            'recruits': list(party.recruits), 'won': won, 'stage': party.stage,
-            'depth': party.depth, 'killer': party.killer, 'slain': party.cs,
-            'gold': party.gold_found, 'ratings': ratings,
-            'score': party.xp_earned + party.gold_found + RATING_POINTS * ratings
-                     + (WIN_POINTS if won else 0)}
+    """What the hall remembers of a run: the facts, then its grade."""
+    hero = party.hero
+    run = {'name': hero.name, 'job': hero.job.name, 'level': hero.level,
+           'recruits': list(party.recruits), 'won': won, 'stage': party.stage,
+           'depth': party.depth, 'killer': '' if won else party.killer,
+           'slain': party.cs - party.bosses, 'bosses': party.bosses,
+           'ratings': sum(party.rating_counts.values()), 'relics': len(party.relics),
+           'gold': party.gold_found, 'hoards': party.hoards, 'fled': party.fled}
+    grade = run_grade(run)
+    return {**run, 'grade': grade, 'tier': tier_of(grade), 'parts': grade_parts(run)}
+
+
+FACTS = ('name', 'job', 'level', 'recruits', 'won', 'stage', 'depth', 'killer', 'slain',
+         'bosses', 'ratings', 'relics', 'gold', 'hoards', 'fled')
+
+
+def submit_link(run):
+    """A link that opens a GitHub issue carrying the run's facts; the
+    leaderboard workflow checks them and adds the run."""
+    facts = json.dumps({key: run[key] for key in FACTS})
+    title = f"Run: {run['name']}, {run['tier']} ({run['grade']})"
+    body = ('Adding a run to the Kobold Cave leaderboard. Leave the block below as it is.\n\n'
+            f'```json\n{facts}\n```\n')
+    query = urllib.parse.urlencode({'title': title, 'body': body})
+    return f'https://github.com/{LEADERBOARD_REPO}/issues/new?{query}'
 
 
 def run_summary(run):
@@ -2298,17 +2351,20 @@ def run_summary(run):
 
 
 def load_hall(path=HALL_FILE):
+    """Runs saved by this version of the game; older ones had no grade."""
     try:
         with open(path) as file:
             runs = json.load(file)
-        return runs if isinstance(runs, list) else []
+        return [run for run in runs if isinstance(run, dict) and 'grade' in run] \
+            if isinstance(runs, list) else []
     except (OSError, ValueError):
         return []
 
 
 def remember_run(party, won, path=HALL_FILE):
-    """Put the run in the hall and show where it placed. The browser keeps
-    its own hall; the terminal keeps one in a file next to the game."""
+    """Grade the run, put it in the hall and show where it placed. The
+    browser keeps its own hall; the terminal keeps one in a file next to
+    the game."""
     record = run_record(party, won)
     if show('record', run=record):
         return
@@ -2318,15 +2374,21 @@ def remember_run(party, won, path=HALL_FILE):
             json.dump(runs, file, indent=1)
     except OSError:
         print('(The hall of legends could not be saved.)')
-    best = sorted(runs, key=lambda run: -run['score'])
+    print('')
+    print(f"GRADE: {record['grade']}, {record['tier'].upper()}")
+    for label, points in record['parts']:
+        print(f'  {label:<15} {points:+}')
+    best = sorted(runs, key=lambda run: -run['grade'])
     print('')
     print('HALL OF LEGENDS')
     for rank, run in enumerate(best[:5], 1):
         mark = '  <- this run' if run is record else ''
-        print(f"{rank:>2}. {run['score']:>5}  {run_summary(run)}{mark}")
+        print(f"{rank:>2}. {run['grade']:>4} {run['tier']:<11} {run_summary(run)}{mark}")
     if record not in best[:5]:
-        print(f'This run scored {record["score"]}, '
-              f'{best.index(record) + 1} of the {len(runs)} in the hall.')
+        print(f'This run placed {best.index(record) + 1} of the {len(runs)} in the hall.')
+    print('')
+    print('To put this run on the shared leaderboard, open this link and submit the issue:')
+    print(submit_link(record))
 
 
 def main():

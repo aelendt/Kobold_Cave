@@ -283,7 +283,6 @@ h1 {
 }
 #hall-dialog[open] { display: flex; flex-direction: column; gap: 0.75rem; }
 #hall-dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
-#hall-dialog > .what { margin: -0.5rem 0 0; }
 .hall-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .hall-head h2 { margin: 0; font: 400 1.6rem/1.15 var(--font-display); color: var(--gold); }
 button.hall-close { padding: 0.4rem 0.7rem; font-size: 0.8rem; }
@@ -306,7 +305,49 @@ li.hall-run.latest { background: rgba(240, 167, 60, 0.08); }
 .hall-top { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: baseline; }
 .hall-outcome { font-size: 0.85rem; color: var(--blood); }
 li.hall-run.won .hall-outcome { color: var(--gold); font-weight: 700; }
-.hall-score { font-weight: 700; color: var(--gold); font-variant-numeric: tabular-nums; }
+.hall-grade { display: flex; flex-direction: column; align-items: flex-end; gap: 0.2rem; }
+.hall-score { font: 400 1.35rem/1 var(--font-display); color: var(--dust); font-variant-numeric: tabular-nums; }
+.hall-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.25rem; }
+.hall-small {
+  font: 700 0.72rem/1 var(--font-body);
+  padding: 0.3rem 0.5rem;
+  color: var(--dust);
+  background: var(--rock-raised);
+  border: 1px solid var(--seam);
+  border-radius: 3px;
+  text-decoration: none;
+  cursor: pointer;
+}
+a.hall-small:hover { border-color: var(--lantern); color: var(--lantern); }
+dl.hall-parts {
+  margin: 0.4rem 0 0;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.1rem 1rem;
+  max-width: 16rem;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+dl.hall-parts dt { color: var(--dust-dim); }
+dl.hall-parts dd { margin: 0; text-align: right; }
+.hall-tiers { margin: 0; display: flex; flex-wrap: wrap; gap: 0.3rem 0.8rem; font-size: 0.72rem; color: var(--dust-dim); }
+/* Tier badges, from Bronze up to Legend. */
+.tier {
+  display: inline-block;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-radius: 2px;
+  border: 1px solid currentColor;
+}
+.tier.bronze { color: #c98a55; }
+.tier.silver { color: #c9ced6; }
+.tier.gold { color: var(--gold); }
+.tier.master { color: #7fc8ff; }
+.tier.grandmaster { color: #c79bff; }
+.tier.legend { color: var(--rock); background: linear-gradient(90deg, var(--gold), #ff9a6a); border-color: transparent; }
 .hall-empty { padding: 1rem 0; color: var(--dust-dim); font-style: italic; }
 .hall-note { margin: 0; font-size: 0.72rem; }
 #open-hall { padding: 0.4rem 0.7rem; font-size: 0.8rem; }
@@ -791,8 +832,10 @@ window.drawScene = function (scene, json) {
     // The end of a run: into the hall of legends, and say where it placed.
     if (scene === 'record') {
       const { place, of } = addRun(details.run);
-      addLine(`Hall of Legends: this run scored ${details.run.score.toLocaleString()}, `
-              + `#${place} of ${of}.`, 'victory');
+      const { grade, tier, parts } = details.run;
+      addLine(`Grade: ${grade}, ${tier}. #${place} of ${of} in the Hall of Legends.`, 'victory');
+      parts.forEach(([label, points]) => addLine(`  ${label} ${points > 0 ? '+' : ''}${points}`, 'stat'));
+      addLine('Open the Hall to see it ranked, or Submit it to the shared leaderboard.', 'system');
       return;
     }
     // Fights start and end new blocks in the log, so each one stands apart.

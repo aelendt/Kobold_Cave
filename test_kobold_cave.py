@@ -3,12 +3,15 @@ import os
 import random
 import tempfile
 import unittest
+import urllib.parse
+from datetime import date
 from contextlib import redirect_stdout
 from dataclasses import replace
 from io import StringIO
 
 import balance_bot
 import kobold_cave as game
+import leaderboard
 
 
 class FakeRng:
@@ -1126,29 +1129,48 @@ class HallTests(unittest.TestCase):
 
     def finished_party(self):
         party = party_of(hero('rogue', name='Vex'))
-        party.xp_earned, party.gold_found, party.cs = 300, 120, 12
+        party.gold_found, party.cs, party.bosses = 120, 13, 1
         party.rating_counts = {'Flawless': 2, 'Swift': 1}
-        party.stage, party.killer = 'Deep Warrens', 'Kobold Heavy'
+        party.stage, party.depth, party.killer = 'Deep Warrens', 1, 'Kobold Heavy'
         party.members[0].health = 0
         return party
 
-    def test_a_run_is_scored_on_xp_gold_ratings_and_the_dragon(self):
+    def test_a_run_is_graded_on_everything_it_did(self):
         record = game.run_record(self.finished_party(), False)
-        self.assertEqual(record['score'], 300 + 120 + 3 * game.RATING_POINTS)
-        self.assertEqual((record['name'], record['job'], record['killer'], record['slain']),
-                         ('Vex', 'Rogue', 'Kobold Heavy', 12))
-        won = game.run_record(self.finished_party(), True)
-        self.assertEqual(won['score'], record['score'] + game.WIN_POINTS)
-        self.assertIn('slew Cinderjaw', game.run_summary(won))
+        self.assertEqual((record['name'], record['job'], record['killer']),
+                         ('Vex', 'Rogue', 'Kobold Heavy'))
+        self.assertEqual((record['slain'], record['bosses']), (12, 1))
+        self.assertEqual(record['parts'], [('Kobolds slain', 36), ('Bosses slain', 20),
+                                           ('Rated wins', 12), ('Gold found', 4)])
+        self.assertEqual((record['grade'], record['tier']), (72, 'Bronze'))
+
+    def test_going_alone_and_fleeing_count_too(self):
+        party = self.finished_party()
+        party.hoards, party.fled = 1, 2
+        record = game.run_record(party, False)
+        self.assertIn(('Kept the hoard', 30), record['parts'])
+        self.assertIn(('Fled', -10), record['parts'])
+        self.assertEqual(record['grade'], 72 + 30 - 10)
+
+    def test_tiers_go_up_in_hundreds(self):
+        self.assertEqual([game.tier_of(grade) for grade in (0, 99, 100, 250, 399, 400, 9999)],
+                         ['Bronze', 'Bronze', 'Silver', 'Gold', 'Master', 'Grandmaster', 'Legend'])
 
     def test_the_terminal_keeps_the_hall_in_a_file(self):
         quietly(game.remember_run, self.finished_party(), False, self.path)
         party = self.finished_party()
-        party.xp_earned = 5000
-        _, out = captured(game.remember_run, party, True, self.path)
+        party.rating_counts = {'Swift': 100}
+        _, out = captured(game.remember_run, party, False, self.path)
         self.assertEqual(len(game.load_hall(self.path)), 2)
-        self.assertIn('HALL OF LEGENDS', out)
-        self.assertIn(' 1.  5695  Vex, level 1 Rogue, slew Cinderjaw  <- this run', out)
+        self.assertIn('GRADE: 460, GRANDMASTER', out)
+        self.assertIn('  Rated wins      +400', out)
+        self.assertIn(' 1.  460 Grandmaster Vex, level 1 Rogue, fell to the Kobold Heavy', out)
+        self.assertIn('https://github.com/aelendt/Kobold_Cave/issues/new?title=Run', out)
+
+    def test_runs_from_before_grading_are_left_out(self):
+        with open(self.path, 'w') as file:
+            json.dump([{'name': 'Old', 'score': 300}], file)
+        self.assertEqual(game.load_hall(self.path), [])
 
     def test_the_browser_keeps_its_own_hall(self):
         scenes = []
@@ -1432,6 +1454,102 @@ class ShowHookTests(unittest.TestCase):
     def test_class_cards_are_plain_data(self):
         game.show('jobs', jobs=[game.job_view(job) for job in game.JOBS.values()])
         self.assertEqual(self.scenes[0][0], 'jobs')
+
+
+class LeaderboardTests(unittest.TestCase):
+    def setUp(self):
+        self.path = os.path.join(tempfile.mkdtemp(), 'leaderboard.json')
+
+    def sent(self, record):
+        """The issue body a player's Submit link fills in."""
+        query = urllib.parse.urlparse(game.submit_link(record)).query
+        return urllib.parse.parse_qs(query)['body'][0]
+
+    def test_every_real_run_is_accepted_and_graded_the_same(self):
+        for job_key in game.JOBS:
+            for seed in range(6):
+                _, record = balance_bot.play_run(job_key, seed, hoard=seed % 2 == 1)
+                run = leaderboard.check(leaderboard.extract(self.sent(record)))
+                self.assertEqual(game.run_grade(run), record['grade'], (job_key, seed))
+
+    def a_win(self, **changes):
+        run = {'name': 'Ada', 'job': 'Wizard', 'level': 6, 'recruits': ['Vex the Rogue'],
+               'won': True, 'stage': 'The Hoard', 'depth': 2, 'killer': '', 'slain': 22,
+               'bosses': 3, 'ratings': 30, 'relics': 2, 'gold': 400, 'hoards': 1, 'fled': 0}
+        return {**run, **changes}
+
+    def test_a_grade_written_into_the_issue_counts_for_nothing(self):
+        run = leaderboard.check(self.a_win(grade=99999, tier='Legend'))
+        self.assertNotIn('grade', run)
+        entry, _ = leaderboard.add(run, 'ada', 1, self.path)
+        self.assertEqual(entry['grade'], game.run_grade(self.a_win()))
+
+    def test_facts_no_run_could_have_are_turned_away(self):
+        for changes, problem in (({'bosses': 2}, 'bosses'),
+                                 ({'won': False, 'killer': 'Kobold Leader'}, 'bosses'),
+                                 ({'killer': 'Kobold Leader'}, 'killer'),
+                                 ({'job': 'Bard'}, 'job'),
+                                 ({'level': 40}, 'level'),
+                                 ({'ratings': 1000}, 'ratings'),
+                                 ({'stage': 'Upper Mines'}, 'disagree'),
+                                 ({'recruits': ['Gandalf the Wizard']}, 'recruits'),
+                                 ({'hoards': 2}, 'not both'),
+                                 ({'gold': '400'}, 'gold'),
+                                 ({'won': 'yes'}, 'won'),
+                                 ({'name': '  '}, 'name')):
+            with self.subTest(changes=changes):
+                with self.assertRaisesRegex(ValueError, problem):
+                    leaderboard.check(self.a_win(**changes))
+        with self.assertRaisesRegex(ValueError, 'missing'):
+            leaderboard.check({'name': 'Ada'})
+
+    def test_names_are_tidied(self):
+        run = leaderboard.check(self.a_win(name='  Ada\u0007 the Unkillable Destroyer of Kobolds'))
+        self.assertEqual(run['name'], 'Ada the Unkillable Destr')
+
+    def test_issues_without_a_run_are_turned_away(self):
+        for body in ('', 'hello', '```json\n{not json}\n```', '```json\n[1, 2]\n```'):
+            with self.assertRaises(ValueError):
+                leaderboard.extract(body)
+
+    def test_the_leaderboard_is_kept_best_first(self):
+        weak = leaderboard.check(self.a_win(won=False, stage='Upper Mines', depth=0, bosses=0,
+                                            killer='Kobold Leader', recruits=[], hoards=0,
+                                            slain=8, ratings=3, relics=0, gold=40, level=2))
+        strong = leaderboard.check(self.a_win())
+        leaderboard.add(weak, 'tess', 1, self.path, date(2026, 10, 30))
+        entry, place = leaderboard.add(strong, 'ada', 2, self.path, date(2026, 10, 31))
+        self.assertEqual(place, 1)
+        board = leaderboard.load(self.path)
+        self.assertEqual([run['player'] for run in board], ['ada', 'tess'])
+        self.assertEqual(board[0]['tier'], game.tier_of(board[0]['grade']))
+        leaderboard.add(strong, 'ada', 2, self.path)  # the same issue again replaces it
+        self.assertEqual(len(leaderboard.load(self.path)), 2)
+        self.assertIn(f"**{entry['grade']}, {entry['tier']}**, #1", leaderboard.reply_for(entry, 1))
+
+    def test_the_workflow_script_replies_either_way(self):
+        saved, environ = leaderboard.LEADERBOARD_FILE, dict(os.environ)
+        leaderboard.LEADERBOARD_FILE = self.path
+        os.environ.update(ISSUE_AUTHOR='ada', ISSUE_NUMBER='7',
+                          ISSUE_BODY=f'```json\n{json.dumps(self.a_win())}\n```')
+        try:
+            status, out = captured(leaderboard.main)
+            self.assertEqual(status, 0, out)
+            self.assertIn('Added to the leaderboard', out)
+            self.assertEqual(leaderboard.load(self.path)[0]['player'], 'ada')
+            os.environ['ISSUE_BODY'] = 'no run here'
+            status, out = captured(leaderboard.main)
+            self.assertEqual(status, 1)
+            self.assertIn("couldn't be added", out)
+        finally:
+            leaderboard.LEADERBOARD_FILE = saved
+            os.environ.clear()
+            os.environ.update(environ)
+
+    def test_the_repository_leaderboard_is_valid(self):
+        for entry in leaderboard.load():
+            run = leaderboard.check(entry)
+            self.assertEqual(entry['grade'], game.run_grade(run))
 
 
 class BalanceBotTests(unittest.TestCase):

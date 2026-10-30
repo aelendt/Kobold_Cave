@@ -201,15 +201,67 @@ it from reading `kobold_cave.py`. The page loads Pyodide from the jsDelivr CDN;
 to play offline, put a copy of Pyodide (from `npm install pyodide@314.0.7`) in
 a `pyodide/` folder next to `index.html`.
 
-## The Hall of Legends
+## Grades and the Hall of Legends
 
-Every run is remembered when it ends. Its score is the XP earned, plus the gold
-found, plus 25 for each Flawless, Swift or Overkill win, plus 500 for slaying
-Cinderjaw. In the browser the Hall button in the header opens the hall: totals,
-your best runs and your most recent ones, with who you played, how far you got
-and what killed you. The browser keeps it in its own storage, so it lives in
-that browser. The terminal keeps it in `kobold_cave_hall.json` next to the
-game and prints the top five after each run.
+When a run ends it gets a grade that counts everything it did:
+
+| Part of the run | Points |
+|---|---|
+| Each kobold slain | 3 |
+| Each boss slain | 20 |
+| Slaying Cinderjaw | 20 more |
+| Each Flawless, Swift or Overkill rating | 4 |
+| Each full trophy set | 12 |
+| Each hero level past the first | 4 |
+| Gold found | 1 per 25 |
+| Each hoard kept instead of freeing a prisoner | 30 |
+| Each fight fled | -5 |
+
+Getting further counts, but how the fights were won, the trophy sets and
+going on alone are what set great runs apart. The grade sets the run's tier:
+
+| Tier | Grade |
+|---|---|
+| Bronze | 0-99 |
+| Silver | 100-199 |
+| Gold | 200-299 |
+| Master | 300-399 |
+| Grandmaster | 400-499 |
+| Legend | 500+ |
+
+Roughly: a run that falls in the Upper Mines is Bronze and one that falls in
+the Deep Warrens is Silver or Gold. A typical win is Master, and a strong one
+is Grandmaster. The balance bot never reaches Legend.
+
+The game remembers every run. In the browser, the Hall button in the header
+opens the Hall of Legends: your best runs and your most recent ones (kept in
+that browser), each with How graded to see the grade add up, and the shared
+leaderboard. The terminal keeps runs in `kobold_cave_hall.json` next to the
+game, and prints the grade and the top five after each run.
+
+### The shared leaderboard
+
+`leaderboard.json` in this repository is the leaderboard everyone shares. To
+add a run, press **Submit** on it in the Hall (the terminal prints a link
+instead). That opens a GitHub issue with the run's facts filled in; submit
+the issue. The Leaderboard workflow (`.github/workflows/leaderboard.yml`)
+runs `leaderboard.py`, which:
+
+- checks the facts are ones a real run could have (a win slew all three
+  bosses, the stage matches how far it got, recruits are real prisoners,
+  numbers are in range), and turns the run away with a reply if not;
+- grades the run again from those facts, so a grade typed into the issue
+  counts for nothing;
+- adds it to `leaderboard.json` under the GitHub account that sent it,
+  best first, then replies with its grade and place and closes the issue.
+
+Only runs someone chooses to submit go on it; the balance bot and the
+tests never send anything. Someone could still make up facts that hang
+together, so it's a leaderboard for friends rather than a guarded one. The
+page reads `leaderboard.json` straight from the repository, so new runs show
+up within a few minutes without the site being rebuilt. The workflow only
+runs once it's on the default branch, and it needs to be allowed to push
+there (it can't if `main` only accepts changes through pull requests).
 
 ## Tests
 
@@ -221,7 +273,7 @@ python3 -m unittest
 
 `balance_bot.py` plays whole runs with a bot that uses its skills, heals when
 hurt, picks its way through the tunnels, equips better gear and spends its
-gold and scrap, then reports how often each class wins, its average score and
+gold and scrap, then reports how often each class wins, its grades and
 what killed it the rest of the time. Runs are seeded, so
 the same command gives the same numbers until the game changes; compare before
 and after a change rather than reading the numbers as a person's odds.

@@ -1,0 +1,57 @@
+name: Leaderboard
+
+# A run sent from the game arrives as an issue titled "Run: ...". This checks
+# it, adds it to leaderboard.json (see leaderboard.py), replies and closes it.
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write  # commit leaderboard.json
+  issues: write  # reply and close
+
+# One at a time, so two runs sent together don't both edit the file.
+concurrency:
+  group: leaderboard
+  cancel-in-progress: false
+
+jobs:
+  add-run:
+    if: startsWith(github.event.issue.title, 'Run:')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Check the run and add it
+        id: add
+        continue-on-error: true  # a run that doesn't check out still gets a reply
+        # The issue's text goes in through the environment, never into the
+        # script itself, so nothing in it can run as a command.
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: python leaderboard.py > reply.md
+      - name: Save the leaderboard
+        if: steps.add.outcome == 'success'
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add leaderboard.json
+          git commit -m "Add run #$ISSUE_NUMBER to the leaderboard"
+          git push
+      - name: Reply and close the issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ADDED: ${{ steps.add.outcome == 'success' }}
+        run: |
+          [ -s reply.md ] || echo 'Something went wrong adding this run. The workflow log has the details.' > reply.md
+          gh issue comment "$ISSUE_NUMBER" --body-file reply.md
+          if [ "$ADDED" = true ]; then reason=completed; else reason='not planned'; fi
+          gh issue close "$ISSUE_NUMBER" --reason "$reason"

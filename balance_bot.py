@@ -288,16 +288,19 @@ def main():
                         help='keep the hoard after each boss instead of freeing the prisoner')
     args = parser.parse_args()
     for job_key in [args.job] if args.job else list(game.JOBS):
-        wins, killers, scores = 0, Counter(), []
+        wins, killers, grades, tiers = 0, Counter(), [], Counter()
         for seed in range(args.runs):
             won, record = play_run(job_key, seed, args.hoard)
             wins += won
-            scores.append(record['score'])
+            grades.append(record['grade'])
+            tiers[record['tier']] += 1
             if not won:
                 killers[record['killer']] += 1
         top = ', '.join(f'{name} {count}' for name, count in killers.most_common(4))
-        print(f'{job_key:8} {wins / args.runs:5.0%}  average score {sum(scores) // len(scores):>4}'
-              f'  lost to: {top or "nothing"}')
+        spread = ', '.join(f'{name} {tiers[name] / args.runs:.0%}'
+                           for _, name in reversed(game.TIERS) if tiers[name])
+        print(f'{job_key:8} {wins / args.runs:5.0%}  lost to: {top or "nothing"}')
+        print(f'{"":8} average grade {sum(grades) // len(grades)}: {spread}')
 
 
 if __name__ == '__main__':
