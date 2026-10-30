@@ -715,6 +715,21 @@ button.drawer-close { padding: 0.4rem 0.7rem; font-size: 0.8rem; }
 <dialog id="spoils-dialog" aria-label="Spoils of battle"></dialog>
 <dialog id="hall-dialog" aria-label="Hall of Legends"></dialog>
 
+<script>
+// GitHub Pages lets browsers reuse script files for ten minutes, but
+// kobold_cave.py is always fetched fresh, so after an update the page could
+// draw new game logic with old pictures. Load the page's own modules fresh
+// as well, through an import map, so the two always match.
+{
+  const fresh = `?v=${Date.now()}`;
+  const imports = Object.fromEntries(['scene.js', 'panels.js', 'hall.js', 'sprites.js'].map(name =>
+    [new URL(name, location.href).href, new URL(name + fresh, location.href).href]));
+  const map = document.createElement('script');
+  map.type = 'importmap';
+  map.textContent = JSON.stringify({ imports });
+  document.currentScript.after(map);
+}
+</script>
 <script type="module">
 import { showScene, showSpoils, celebrate, clearScene } from './scene.js';
 import { drawPartyPanel, drawInfoPanel, clearPanels, onEquip, onCloseDrawer } from './panels.js';
