@@ -361,8 +361,9 @@ class TrinketTests(unittest.TestCase):
         quietly(game.claim_boss_drop, party_of(rogue), game.spawn('kobold_warchief'),
                 answers())
         self.assertIn(game.ITEMS['hand_axe'], rogue.equipment.values())
-        quietly(game.claim_boss_drop, party_of(rogue), game.spawn('kobold_leader'))
+        found = quietly(game.claim_boss_drop, party_of(rogue), game.spawn('kobold_leader'))
         self.assertEqual(rogue.trinket, game.ITEMS['junk_crown'])
+        self.assertEqual(found, 'Junk Crown: to Test')
 
     def test_in_a_party_you_choose_who_claims_the_prize(self):
         warrior, wizard = hero(), companion('wizard', 'Ysolde')
@@ -1161,7 +1162,8 @@ class ShowHookTests(unittest.TestCase):
         member = details['party'][0]
         self.assertEqual(member['spell_power'], 60)
         self.assertIn({'slot': 'Trinket', 'name': 'Lucky Coin',
-                       'describe': game.ITEMS['lucky_coin'].describe(), 'candidates': []},
+                       'describe': game.ITEMS['lucky_coin'].describe(), 'forged': 0,
+                       'candidates': []},
                       member['gear'])
         skills = {skill['name']: skill for skill in member['skills']}
         self.assertEqual(skills['Mana Surge']['kind'], 'signature')
@@ -1180,6 +1182,19 @@ class ShowHookTests(unittest.TestCase):
         spoils = json.loads(details)['spoils']
         self.assertEqual((spoils['xp'], spoils['gold'], spoils['found']), (15, 6, 'Nothing of worth'))
         self.assertEqual(party.gold, 6)
+        # The fight's end is marked first, so the log can start a fresh block.
+        self.assertEqual(self.scenes[0][0], 'aftermath')
+
+    def test_the_panel_shows_how_often_gear_was_reforged(self):
+        warrior = hero()
+        blade = game.reforged(game.reforged(game.ITEMS['mithril_blade']))
+        game.equip(warrior, 'Sword', blade)
+        game.show_party('explore', party_of(warrior))
+        gear = json.loads(self.scenes[-1][1])['party'][0]['gear']
+        sword = next(slot for slot in gear if slot['slot'] == 'Sword')
+        self.assertEqual((sword['name'], sword['describe']), ('Mithril Blade +2', '+23 attack'))
+        self.assertEqual((sword['forged'], sword['forge_limit'], sword['forge_gains']),
+                         (2, game.FORGE_LIMIT, '+8 attack'))
 
     def test_class_cards_are_plain_data(self):
         game.show('jobs', jobs=[game.job_view(job) for job in game.JOBS.values()])

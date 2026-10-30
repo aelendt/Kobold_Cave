@@ -60,14 +60,15 @@ class Item:
     forged: int = 0  # times reforged at a forge, shown as "+1" and so on
 
     def describe(self):
-        bonuses = [(self.attack, 'attack'), (self.max_health, 'max HP'),
-                   (self.spell_power, 'spell power'), (self.mana, 'mana'),
-                   (self.dodge, 'dodge')]
-        parts = [f'+{amount} {stat}' for amount, stat in bonuses if amount]
+        parts = [f'+{getattr(self, stat)} {label}' for stat, label in STAT_LABELS.items()
+                 if getattr(self, stat)]
         if self.effect:
             parts.append(TRINKET_EFFECTS[self.effect])
         return ', '.join(parts)
 
+
+STAT_LABELS = {'attack': 'attack', 'max_health': 'max HP', 'spell_power': 'spell power',
+               'mana': 'mana', 'dodge': 'dodge'}
 
 TRINKET_EFFECTS = {
     'lifesteal': 'heals you for 15% of the damage you deal',
@@ -270,11 +271,20 @@ def hero_view(character):
             'effects': hero_effects(character),
             'attack': character.attack, 'dodge': character.dodge,
             'spell_power': character.spell_power,
-            'gear': [{'slot': slot, 'name': item.name if item else None,
-                      'describe': item.describe() if item else ''}
-                     for slot, item in character.equipment.items()],
+            'gear': [gear_view(slot, item) for slot, item in character.equipment.items()],
             'skills': [skill_view(character, name) for name in character.actions],
             'boons': [boon.name for boon in character.boons]}
+
+
+def gear_view(slot, item):
+    """A gear slot as the party panel shows it, with how much reforging added."""
+    view = {'slot': slot, 'name': item.name if item else None,
+            'describe': item.describe() if item else '', 'forged': 0}
+    if item and item.forged:
+        gains = ', '.join(f'+{amount * item.forged} {STAT_LABELS[stat]}'
+                          for stat, amount in REFORGE[item.kind].items())
+        view.update(forged=item.forged, forge_limit=FORGE_LIMIT, forge_gains=gains)
+    return view
 
 
 def skill_view(member, name):
@@ -1650,12 +1660,16 @@ def clear_stage(party, stage, rng=random, ask=input):
     if not fight(party, boss, rng, ask):
         return False
     party.cs += 1
+    show_party('aftermath', party, boss)
     print('')
     print(stage.boss_outro)
-    award_xp(party, boss, rng, ask)
-    collect_gold(party, boss)
-    claim_boss_drop(party, boss, ask)
-    find_bandages(party, boss, rng)
+    levelled = award_xp(party, boss, rng, ask)
+    gold = collect_gold(party, boss)
+    found = claim_boss_drop(party, boss, ask)
+    bandages = find_bandages(party, boss, rng)
+    show_party('spoils', party, spoils={
+        'monster': boss.name, 'xp': boss.xp, 'levelled': levelled, 'gold': gold,
+        'found': found, 'bandages': bandages, 'healing': {}})
     return True
 
 
@@ -1671,6 +1685,7 @@ def after_victory(party, monster, rng=random, ask=input, camp=True):
     so the browser can sum it all up at a glance. An ambush leaves no camp
     to search."""
     party.cs += 1
+    show_party('aftermath', party, monster)
     print('Your enemy has fallen. You may move on.')
     print(f'Creep Score: {party.cs}')
     levelled = award_xp(party, monster, rng, ask)
@@ -1893,9 +1908,10 @@ def fork(party, stage, kills, rng=random, ask=input):
 
 
 def claim_boss_drop(party, boss, ask=input):
+    """Returns what was found and where it went, for the spoils card."""
     drops = BOSS_DROPS.get(boss.name)
     if not drops or not party.alive:
-        return
+        return 'Nothing of worth'
     # Each class would get its own version, so you choose who claims it first.
     claimant = party.living[0]
     if len(party.living) > 1:
@@ -1911,8 +1927,9 @@ def claim_boss_drop(party, boss, ask=input):
     if slot:
         equip(claimant, slot, item)
         narrate(claimant, f'You equip the [{item.name}].', f'{{name}} equips the [{item.name}].')
-    else:
-        stow(party, item)
+        return f'{item.name}: to {claimant.name}'
+    stow(party, item)
+    return f'{item.name}: into the bag'
 
 
 current_party = None  # the party being played, for the browser's Equip buttons

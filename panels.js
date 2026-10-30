@@ -76,7 +76,7 @@ function memberView(member) {
   }
 
   const gear = element('ul', 'gear');
-  member.gear.forEach(({ slot, name, describe, candidates }) => {
+  member.gear.forEach(({ slot, name, describe, candidates, forged, forge_limit, forge_gains }) => {
     const row = element('li');
     const key = `${member.name}|${slot}`;
     const top = element('div', 'gear-top');
@@ -97,6 +97,9 @@ function memberView(member) {
     }
     row.append(element('span', 'slot', slot), top);
     if (describe) row.append(element('span', 'what', describe));
+    if (forged) {
+      row.append(element('span', 'what forged', `Reforged ${forged} of ${forge_limit}: ${forge_gains}`));
+    }
     if (openSlot === key && !latest.in_fight) {
       const options = element('div', 'equip-options');
       candidates.forEach(item => {

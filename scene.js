@@ -207,21 +207,67 @@ function recruitCards({ prisoners, boon, abilities }, pick) {
   return grid;
 }
 
-function spoilsCard(spoils) {
+// What a win paid out, as [label, text, class] rows, for the card and the pop-up.
+function spoilsRows(spoils, partySize = 1) {
+  const rows = [['XP', `+${spoils.xp}${partySize > 1 ? ' each' : ''}`, 'gain']];
+  spoils.levelled.forEach(line => rows.push(['Level up', line, 'gain']));
+  if (spoils.gold) rows.push(['Gold', `+${spoils.gold}`, 'gold']);
+  // Finds come as "Item: where it went"; anything else is a plain note.
+  const found = spoils.found.includes(': ');
+  rows.push(['Loot', found ? spoils.found.replace(/: (.*)/, ' ($1)') : spoils.found, found ? 'loot' : '']);
+  if (spoils.bandages) rows.push(['Bandages', `+${spoils.bandages}`, '']);
+  const rested = Object.entries(spoils.healing).filter(([, hp]) => hp > 0)
+    .map(([name, hp]) => `${name} +${hp} HP`);
+  if (rested.length) rows.push(['Rested', rested.join(', '), '']);
+  return rows;
+}
+
+function spoilsCard(spoils, partySize) {
   const card = element('div', 'side venue-notes');
   card.append(element('div', 'who', `${spoils.monster} defeated`));
   const list = element('ul', 'spoils');
-  const add = (text, cls = '') => list.append(element('li', cls, text));
-  add(`+${spoils.xp} XP`);
-  spoils.levelled.forEach(line => add(line, 'gain'));
-  if (spoils.gold) add(`+${spoils.gold} gold`, 'gold');
-  add(`Loot: ${spoils.found}`, spoils.found === 'Nothing of worth' ? '' : 'loot');
-  if (spoils.bandages) add(`+${spoils.bandages} bandage${spoils.bandages > 1 ? 's' : ''}`);
-  const rested = Object.entries(spoils.healing).filter(([, hp]) => hp > 0)
-    .map(([name, hp]) => `${name} +${hp}`);
-  if (rested.length) add(`Rested: ${rested.join(', ')} HP`);
+  spoilsRows(spoils, partySize).forEach(([label, text, cls]) =>
+    list.append(element('li', cls, `${label}: ${text}`)));
   card.append(list);
   return card;
+}
+
+// After a win, a pop-up lists the rewards one at a time and waits to be
+// closed; the returned promise resolves when it is. Closing it before the
+// list has finished just shows the rest at once.
+const ROW_DELAY = 0.3;  // seconds between rewards appearing
+export function showSpoils(spoils, details) {
+  const dialog = document.getElementById('spoils-dialog');
+  const rows = spoilsRows(spoils, details.party.length);
+  const list = element('ul', 'reward-list');
+  rows.forEach(([label, text, cls], i) => {
+    const row = element('li', cls);
+    row.style.animationDelay = `${i * ROW_DELAY}s`;
+    row.append(element('span', 'label', label), element('span', 'value', text));
+    list.append(row);
+  });
+  const totals = element('p', 'totals', `Gold ${details.gold} · Bandages ${details.bandages}`
+                                        + ` · Bag ${details.bag.length}/${details.bag_size}`);
+  const collect = element('button', 'collect', 'Collect');
+  collect.type = 'button';
+  dialog.replaceChildren(element('h2', '', `${spoils.monster} defeated`),
+                         element('p', 'what', 'Spoils of battle'), list, totals, collect);
+
+  let ready = reduceMotion.matches;
+  const finish = () => { ready = true; list.classList.add('shown'); };
+  const timer = setTimeout(finish, rows.length * ROW_DELAY * 1000);
+  return new Promise(resolve => {
+    const close = () => {
+      if (!ready) return finish();
+      clearTimeout(timer);
+      dialog.close();
+    };
+    collect.addEventListener('click', close);
+    dialog.oncancel = event => { event.preventDefault(); close(); };  // Escape
+    dialog.addEventListener('close', resolve, { once: true });
+    dialog.showModal();
+    collect.focus();
+  });
 }
 
 function forkCards(pick) {
@@ -294,7 +340,7 @@ export function showScene(scene, details, { pick }) {
   if (scene === 'spoils') {
     previous.enemy = null;
     const arena = element('div', 'arena');
-    arena.append(partySide(details, scene), spoilsCard(details.spoils));
+    arena.append(partySide(details, scene), spoilsCard(details.spoils, details.party.length));
     panel.replaceChildren(arena);
     return;
   }
