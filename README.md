@@ -193,3 +193,17 @@ a `pyodide/` folder next to `index.html`.
 ```bash
 python3 -m unittest
 ```
+
+### Checking the balance
+
+`balance_bot.py` plays whole runs with a bot that uses its skills, heals when
+hurt, equips better gear and spends its gold and scrap, then reports how often
+each class wins and what killed it the rest of the time. Runs are seeded, so
+the same command gives the same numbers until the game changes; compare before
+and after a change rather than reading the numbers as a person's odds.
+
+```bash
+python3 balance_bot.py                        # 200 runs of each class
+python3 balance_bot.py --runs 1000 --hoard    # keep every hoard, so play alone
+python3 balance_bot.py --job wizard --fork Trader
+```

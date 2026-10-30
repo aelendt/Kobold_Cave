@@ -4,6 +4,7 @@ from contextlib import redirect_stdout
 from dataclasses import replace
 from io import StringIO
 
+import balance_bot
 import kobold_cave as game
 
 
@@ -1282,6 +1283,21 @@ class ShowHookTests(unittest.TestCase):
     def test_class_cards_are_plain_data(self):
         game.show('jobs', jobs=[game.job_view(job) for job in game.JOBS.values()])
         self.assertEqual(self.scenes[0][0], 'jobs')
+
+
+class BalanceBotTests(unittest.TestCase):
+    """The bot answers every question the game asks, so a new or reworded
+    question that it doesn't understand fails here rather than mid-measurement."""
+
+    def test_the_bot_plays_whole_runs_of_every_class(self):
+        for job_key in game.JOBS:
+            for seed in range(3):
+                for hoard, fork in ((False, 'Forge'), (True, 'Trader'), (False, 'Tunnel')):
+                    won, death = balance_bot.play_run(job_key, seed, hoard, fork)
+                    self.assertTrue(won or death, (job_key, seed, hoard, fork))
+
+    def test_runs_are_repeatable(self):
+        self.assertEqual(balance_bot.play_run('wizard', 7), balance_bot.play_run('wizard', 7))
 
 
 if __name__ == '__main__':
