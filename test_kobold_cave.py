@@ -670,6 +670,7 @@ class WizardSkillTests(unittest.TestCase):
         party = party_of(wizard)
         turn(wizard, party, kobold(), [], 'mana surge')
         self.assertEqual(wizard.mana, 3)
+        self.assertTrue(wizard.defending)  # guards while drawing it in
         wizard.mana = 5
         game.end_round(party), game.end_round(party), game.end_round(party)
         _, out = captured(game.take_turn, wizard, party, kobold(), FakeRng(0),

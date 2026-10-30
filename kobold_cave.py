@@ -961,8 +961,9 @@ def mana_surge(member, party, monster, rng, ask):
         narrate(member, 'Your mana is already full.', "{name}'s mana is already full.")
         return RETRY
     member.mana += gained
-    narrate(member, f'You draw in the magic around you and regain {gained} mana.',
-            f'{{name}} draws in the magic around them and regains {gained} mana.')
+    member.defending = True
+    narrate(member, f'You draw in the magic around you, staff raised, and regain {gained} mana.',
+            f'{{name}} draws in the magic around them, staff raised, and regains {gained} mana.')
 
 
 def cast_fireball(member, party, monster, rng, ask):
@@ -1073,7 +1074,7 @@ ACTIONS = {action.name: action for action in (
     Action('Assassinate', assassinate, 'Triple damage against an enemy below 30% health. '
                                        'Every 4 rounds.', cooldown=4),
     # Wizard
-    Action('Mana Surge', mana_surge, 'Spend your turn regaining 2 mana. Every 3 rounds.',
+    Action('Mana Surge', mana_surge, 'Regain 2 mana, guarding as you do. Every 3 rounds.',
            cooldown=3),
     Action('Fireball', cast_fireball, 'Heavy fire damage, but it sometimes misses or '
                                       'misfires.', mana=1),

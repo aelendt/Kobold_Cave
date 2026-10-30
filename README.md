@@ -43,7 +43,7 @@ A full run reaches about level 6.
 - **Assassinate** (Boon): triple damage against an enemy below 30% health. Every 4 rounds.
 
 **Wizard**
-- **Mana Surge** (signature): spend your turn regaining 2 mana. Every 3 rounds.
+- **Mana Surge** (signature): regain 2 mana, guarding as you do (like Defend). Every 3 rounds.
 - **Fireball** (1 mana): heavy damage, but it sometimes misses or misfires.
 - **Mend** (1 mana): heal yourself or an ally.
 - **Frost Bolt** (1 mana): never misses, and may freeze the enemy in place.
