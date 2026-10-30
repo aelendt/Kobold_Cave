@@ -1,6 +1,7 @@
 // The two side panels: the party (one tab per hero, with stats, gear and
-// skills) on the left, and the enemy, the journey and supplies on the right.
-// Both redraw from the same details kobold_cave.py sends to show().
+// skills) on the left, and the enemy, the journey, trophies and supplies on
+// the right. Both redraw from the same details kobold_cave.py sends to show(),
+// with their sections in whatever order the player has put them.
 import { SPRITES, PALETTE } from './sprites.js';
 
 const partyPanel = document.getElementById('party-panel');
@@ -37,10 +38,102 @@ function sprite(name) {
   return canvas;
 }
 
-function section(title, ...children) {
+function section(key, title, ...children) {
   const box = element('section', 'panel-section');
+  box.dataset.key = key;
   box.append(element('h2', '', title), ...children);
   return box;
+}
+
+// Each panel's sections can be put in any order: drag a heading, or use its
+// arrows. The order is remembered in this browser, if it lets us.
+const DEFAULT_ORDER = {
+  party: ['stats', 'gear', 'skills', 'boons'],
+  info: ['enemy', 'journey', 'trophies', 'supplies'],
+};
+const ORDER_STORE = 'kobold-cave-section-order';
+const order = (() => {
+  try {
+    return JSON.parse(localStorage.getItem(ORDER_STORE)) || {};
+  } catch {
+    return {};
+  }
+})();
+
+// The panel's full order: what was saved, then anything new in default order.
+function orderOf(panel) {
+  const saved = (order[panel] || []).filter(key => DEFAULT_ORDER[panel].includes(key));
+  return [...saved, ...DEFAULT_ORDER[panel].filter(key => !saved.includes(key))];
+}
+
+function saveOrder(panel, keys) {
+  order[panel] = keys;
+  try {
+    localStorage.setItem(ORDER_STORE, JSON.stringify(order));
+  } catch {
+    // Storage is blocked; the order lasts until the page reloads.
+  }
+}
+
+let dragging = null;  // { panel, key } while a heading is being dragged
+
+// Sorts a panel's sections into the saved order and gives each heading
+// its drag handle and arrows. redraw() draws the panel again after a move.
+function arrange(panel, sections, redraw) {
+  const keys = orderOf(panel);
+  sections.sort((a, b) => keys.indexOf(a.dataset.key) - keys.indexOf(b.dataset.key));
+  const shown = sections.map(box => box.dataset.key);
+  const move = (key, target, after = false) => {
+    const next = orderOf(panel).filter(other => other !== key);
+    next.splice(next.indexOf(target) + (after ? 1 : 0), 0, key);
+    saveOrder(panel, next);
+    redraw();
+  };
+
+  sections.forEach((box, i) => {
+    const key = box.dataset.key;
+    const heading = box.querySelector('h2');
+    const title = heading.textContent;
+    heading.textContent = '';
+    heading.draggable = true;
+    heading.title = 'Drag to move this section';
+    const arrows = element('span', 'reorder');
+    [['▲', 'up', shown[i - 1], false], ['▼', 'down', shown[i + 1], true]].forEach(([mark, way, target, after]) => {
+      const button = element('button', 'reorder-button', mark);
+      button.type = 'button';
+      button.setAttribute('aria-label', `Move ${title} ${way}`);
+      button.disabled = !target;
+      button.addEventListener('click', () => move(key, target, after));
+      arrows.append(button);
+    });
+    heading.append(element('span', 'section-title', title), arrows);
+
+    heading.addEventListener('dragstart', event => {
+      dragging = { panel, key };
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', title);
+      box.classList.add('dragging');
+    });
+    heading.addEventListener('dragend', () => {
+      dragging = null;
+      box.classList.remove('dragging');
+    });
+    // Dropping on the top half of a section puts the dragged one above it.
+    const below = event => event.clientY > box.getBoundingClientRect().top + box.offsetHeight / 2;
+    box.addEventListener('dragover', event => {
+      if (dragging?.panel !== panel || dragging.key === key) return;
+      event.preventDefault();
+      box.classList.toggle('drop-after', below(event));
+      box.classList.toggle('drop-before', !below(event));
+    });
+    box.addEventListener('dragleave', () => box.classList.remove('drop-before', 'drop-after'));
+    box.addEventListener('drop', event => {
+      if (dragging?.panel !== panel || dragging.key === key) return;
+      event.preventDefault();
+      move(dragging.key, key, below(event));
+    });
+  });
+  return sections;
 }
 
 function definitions(rows) {
@@ -68,12 +161,13 @@ function memberView(member) {
   rows.push(['Attack', member.attack], ['Dodge', member.dodge]);
   if (member.max_mana) rows.push(['Spell power', member.spell_power]);
   rows.push(['XP', xp]);
-  view.append(section('Stats', definitions(rows)));
+  const stats = section('stats', 'Stats', definitions(rows));
   if (member.effects.length) {
     const chips = element('div', 'effects');
     member.effects.forEach(effect => chips.append(element('span', 'chip', effect)));
-    view.lastChild.append(chips);
+    stats.append(chips);
   }
+  const sections = [stats];
 
   const gear = element('ul', 'gear');
   member.gear.forEach(({ slot, name, describe, candidates, forged, forge_limit, forge_gains }) => {
@@ -116,7 +210,7 @@ function memberView(member) {
     }
     gear.append(row);
   });
-  view.append(section('Gear', gear));
+  sections.push(section('gear', 'Gear', gear));
 
   const skills = element('ul', 'skills');
   const allSkills = [
@@ -139,9 +233,12 @@ function memberView(member) {
     row.append(top, element('div', 'what', skill.description));
     skills.append(row);
   });
-  view.append(section('Skills', skills));
+  sections.push(section('skills', 'Skills', skills));
 
-  if (member.boons.length) view.append(section('Boons', element('p', 'what', member.boons.join(', '))));
+  if (member.boons.length) {
+    sections.push(section('boons', 'Boons', element('p', 'what', member.boons.join(', '))));
+  }
+  view.append(...arrange('party', sections, () => drawPartyPanel()));
   return view;
 }
 
@@ -167,9 +264,13 @@ export function drawPartyPanel(details) {
   partyPanel.replaceChildren(element('h2', 'panel-title', 'Party'), tabs, memberView(member));
 }
 
+let latestInfo = null;  // the last field-notes details, so a move can redraw
+
 export function drawInfoPanel(details) {
-  if (!details?.stages) return;
-  const blocks = [element('h2', 'panel-title', 'Field notes')];
+  if (details?.stages) latestInfo = details;
+  if (!latestInfo) return;
+  details = latestInfo;
+  const blocks = [];
 
   const { enemy } = details;
   if (enemy) {
@@ -187,9 +288,9 @@ export function drawInfoPanel(details) {
     });
     const facts = definitions([['Health', `${Math.max(0, enemy.health)} / ${enemy.max_health}`],
                                ['Attack', enemy.attack]]);
-    blocks.push(section(enemy.name, facts, abilities));
+    blocks.push(section('enemy', enemy.name, facts, abilities));
   } else {
-    blocks.push(section('Enemy', element('p', 'what', 'Nothing in sight. Yet.')));
+    blocks.push(section('enemy', 'Enemy', element('p', 'what', 'Nothing in sight. Yet.')));
   }
 
   const journey = element('ol', 'journey');
@@ -211,7 +312,7 @@ export function drawInfoPanel(details) {
   });
   const tally = definitions(['Flawless', 'Swift', 'Overkill'].map(name =>
     [`${name} wins`, details.ratings[name] || 0]));
-  blocks.push(section('Journey', journey, element('p', 'what', `Kobolds slain: ${details.cs}`), tally));
+  blocks.push(section('journey', 'Journey', journey, element('p', 'what', `Kobolds slain: ${details.cs}`), tally));
 
   // Trophies come from wins with two ratings or more; a full set helps everyone.
   const trophies = element('ul', 'skills');
@@ -225,7 +326,7 @@ export function drawInfoPanel(details) {
                                                 : `Set: ${trophy.relic}, ${trophy.describe}`));
     trophies.append(row);
   });
-  blocks.push(section('Trophies', element('p', 'what', 'Kobolds give these up when beaten in style.'),
+  blocks.push(section('trophies', 'Trophies', element('p', 'what', 'Kobolds give these up when beaten in style.'),
                       trophies));
 
   const bag = element('ul', 'gear');
@@ -238,14 +339,15 @@ export function drawInfoPanel(details) {
   } else {
     bag.append(element('li', 'empty', 'The bag is empty.'));
   }
-  blocks.push(section('Supplies', definitions([['Gold', details.gold], ['Scrap', details.scrap],
+  blocks.push(section('supplies', 'Supplies', definitions([['Gold', details.gold], ['Scrap', details.scrap],
                                                ['Bandages', details.bandages],
                                                ['Bag', `${details.bag.length} / ${details.bag_size}`]]), bag));
-  infoPanel.replaceChildren(...blocks);
+  infoPanel.replaceChildren(element('h2', 'panel-title', 'Field notes'),
+                            ...arrange('info', blocks, () => drawInfoPanel()));
 }
 
 export function clearPanels() {
-  selected = latest = openSlot = null;
+  selected = latest = latestInfo = openSlot = null;
   partyPanel.replaceChildren(element('h2', 'panel-title', 'Party'),
                              element('p', 'what', 'Your hero appears here once you choose a class.'));
   infoPanel.replaceChildren(element('h2', 'panel-title', 'Field notes'),

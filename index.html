@@ -81,6 +81,22 @@ main { grid-area: main; display: flex; flex-direction: column; min-height: 0; mi
   border-bottom: 1px solid var(--seam);
   padding-bottom: 0.25rem;
 }
+/* Sections can be dragged by their heading or moved with its arrows (panels.js). */
+.panel-section h2 { display: flex; align-items: center; gap: 0.4rem; cursor: grab; }
+.panel-section h2 .section-title { flex: 1; min-width: 0; }
+.reorder { display: flex; gap: 0.15rem; opacity: 0.35; transition: opacity 0.15s; }
+.panel-section:hover .reorder, .reorder:focus-within { opacity: 1; }
+@media (hover: none) { .reorder { opacity: 1; } }
+button.reorder-button {
+  padding: 0.1rem 0.3rem;
+  font-size: 0.6rem;
+  line-height: 1;
+  color: var(--dust-dim);
+}
+button.reorder-button:disabled { visibility: hidden; }
+.panel-section.dragging { opacity: 0.4; }
+.panel-section.drop-before { box-shadow: 0 -2px 0 var(--lantern); }
+.panel-section.drop-after { box-shadow: 0 2px 0 var(--lantern); }
 .tabs { display: flex; flex-wrap: wrap; gap: 0.3rem; }
 .tab { padding: 0.4rem 0.6rem; font-size: 0.85rem; }
 .tab[aria-selected="true"] { border-color: var(--lantern); color: var(--lantern); }
