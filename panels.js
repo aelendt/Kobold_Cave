@@ -10,6 +10,12 @@ let selected = null;  // name of the hero whose tab is open
 let latest = null;  // the last party details, so a tab click can redraw
 let openSlot = null;  // the slot whose Equip list is showing, as "hero|slot"
 let equipHandler = () => {};
+let closeHandler = () => {};
+
+// index.html supplies how the Close button shuts a panel opened as a drawer.
+export function onCloseDrawer(handler) {
+  closeHandler = handler;
+}
 
 // index.html supplies what an Equip choice does (answer the game with it).
 export function onEquip(handler) {
@@ -36,6 +42,16 @@ function sprite(name) {
     ctx.fillRect(x, y, 1, 1);
   }));
   return canvas;
+}
+
+// A panel's title, with a Close button that only shows when it's a drawer.
+function panelHeading(text) {
+  const head = element('div', 'panel-head');
+  const close = element('button', 'drawer-close', 'Close');
+  close.type = 'button';
+  close.addEventListener('click', () => closeHandler());
+  head.append(element('h2', 'panel-title', text), close);
+  return head;
 }
 
 function section(key, title, ...children) {
@@ -261,7 +277,7 @@ export function drawPartyPanel(details) {
     tabs.append(tab);
   });
   const member = party.find(m => m.name === selected);
-  partyPanel.replaceChildren(element('h2', 'panel-title', 'Party'), tabs, memberView(member));
+  partyPanel.replaceChildren(panelHeading('Party'), tabs, memberView(member));
 }
 
 let latestInfo = null;  // the last field-notes details, so a move can redraw
@@ -342,14 +358,14 @@ export function drawInfoPanel(details) {
   blocks.push(section('supplies', 'Supplies', definitions([['Gold', details.gold], ['Scrap', details.scrap],
                                                ['Bandages', details.bandages],
                                                ['Bag', `${details.bag.length} / ${details.bag_size}`]]), bag));
-  infoPanel.replaceChildren(element('h2', 'panel-title', 'Field notes'),
+  infoPanel.replaceChildren(panelHeading('Field notes'),
                             ...arrange('info', blocks, () => drawInfoPanel()));
 }
 
 export function clearPanels() {
   selected = latest = latestInfo = openSlot = null;
-  partyPanel.replaceChildren(element('h2', 'panel-title', 'Party'),
+  partyPanel.replaceChildren(panelHeading('Party'),
                              element('p', 'what', 'Your hero appears here once you choose a class.'));
-  infoPanel.replaceChildren(element('h2', 'panel-title', 'Field notes'),
+  infoPanel.replaceChildren(panelHeading('Field notes'),
                             element('p', 'what', 'Notes on the mines and whatever lives in them.'));
 }

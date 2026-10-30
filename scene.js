@@ -224,7 +224,7 @@ function spoilsRows(spoils, partySize = 1) {
 }
 
 function spoilsCard(spoils, partySize) {
-  const card = element('div', 'side venue-notes');
+  const card = element('div', 'side venue-notes spoils-card');
   card.append(element('div', 'who', `${spoils.monster} defeated`));
   const list = element('ul', 'spoils');
   if (spoils.ratings.length) {
@@ -454,7 +454,7 @@ export function showScene(scene, details, { pick }) {
   }
   if (scene === 'spoils') {
     previous.enemy = null;
-    const arena = element('div', 'arena');
+    const arena = element('div', 'arena spoils');
     arena.append(partySide(details, scene), spoilsCard(details.spoils, details.party.length));
     panel.replaceChildren(arena);
     return;
