@@ -262,6 +262,47 @@ ul.reward-list .gain .value, ul.reward-list .gold .value { color: var(--gold); f
 ul.reward-list .loot .value { color: var(--copper); font-weight: 700; }
 #spoils-dialog .totals { margin: 0 0 1rem; font-size: 0.8rem; color: var(--dust-dim); font-variant-numeric: tabular-nums; }
 #spoils-dialog .collect { width: 100%; justify-content: center; border-color: var(--lantern); color: var(--lantern); }
+#spoils-dialog.boss { width: min(30rem, calc(100vw - 32px)); border-color: var(--gold); }
+#spoils-dialog .verdict { margin: 0 0 1rem; font-style: italic; color: var(--dust); }
+.stamps { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-bottom: 0.8rem; }
+.stamps:empty { display: none; }
+.stamp {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0.3rem 0.6rem;
+  font: 400 1.05rem/1.1 var(--font-display);
+  color: var(--gold);
+  border: 2px solid currentColor;
+  border-radius: 3px;
+  transform: rotate(-4deg);
+}
+.stamp:nth-child(2) { transform: rotate(3deg); }
+.stamp small { font: 700 0.7rem/1.2 var(--font-body); letter-spacing: 0.04em; }
+.stamp.overkill { color: var(--blood); }
+.stamp.swift { color: var(--mana); }
+ul.reward-list .note { display: block; font-size: 0.75rem; font-weight: 400; color: var(--dust-dim); }
+.xp-meter { display: flex; align-items: center; gap: 0.6rem; }
+.xp-meter .bar.xp { flex: 1; height: 0.55rem; }
+.xp-meter .bar i { transition: width 0.6s ease-out; }
+.xp-tag { font-size: 0.75rem; color: var(--dust-dim); min-width: 4.5rem; text-align: right; }
+.xp-meter.levelled .xp-tag { color: var(--gold); font-weight: 700; }
+.count { font-variant-numeric: tabular-nums; }
+/* The killing blow (celebrate in scene.js). */
+#scene { position: relative; }
+.victory-banner {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  transform: translate(-50%, -50%);
+  padding: 0.3rem 1.2rem;
+  font: 400 2.2rem/1.1 var(--font-display);
+  color: var(--gold);
+  white-space: nowrap;
+  text-shadow: 0 0 18px rgba(244, 210, 122, 0.6), 0 2px 0 var(--rock);
+  background: radial-gradient(ellipse at center, rgba(27, 23, 20, 0.85) 30%, transparent 75%);
+  pointer-events: none;
+}
+canvas.burst { position: fixed; pointer-events: none; z-index: 40; image-rendering: pixelated; }
 .tray {
   border-bottom: 1px solid var(--seam);
   padding-block: 0.75rem;
@@ -467,8 +508,21 @@ button.job:hover .who { color: var(--lantern); }
   }
   .fallen .portrait { transition: filter 0.6s; }
   ul.reward-list li { animation: reward-in 0.3s ease-out backwards; }
-  ul.reward-list.shown li { animation: none; }
   @keyframes reward-in { from { opacity: 0; transform: translateX(-8px); } }
+  .stamp { animation: stamp-in 0.35s cubic-bezier(0.2, 1.6, 0.4, 1) backwards; }
+  @keyframes stamp-in { from { opacity: 0; transform: scale(2.2) rotate(-12deg); } }
+  #spoils-dialog.shown li, #spoils-dialog.shown .stamp { animation: none; }
+  .xp-meter.levelled .xp-tag { animation: flash 0.5s ease-out; }
+  @keyframes flash { 50% { color: #fff; text-shadow: 0 0 10px var(--gold); } }
+  .victory-banner { animation: banner-in 0.45s cubic-bezier(0.2, 1.5, 0.4, 1) 0.15s backwards; }
+  @keyframes banner-in { from { opacity: 0; transform: translate(-50%, -50%) scale(0.4); } }
+  #scene.shake { animation: shake-panel 0.4s ease-out; }
+  @keyframes shake-panel {
+    20% { transform: translate(-6px, 2px); }
+    40% { transform: translate(5px, -3px); }
+    60% { transform: translate(-3px, 1px); }
+    80% { transform: translate(2px, 0); }
+  }
 }
 </style>
 </head>
@@ -503,7 +557,7 @@ button.job:hover .who { color: var(--lantern); }
 <dialog id="spoils-dialog" aria-label="Spoils of battle"></dialog>
 
 <script type="module">
-import { showScene, showSpoils, clearScene } from './scene.js';
+import { showScene, showSpoils, celebrate, clearScene } from './scene.js';
 import { drawPartyPanel, drawInfoPanel, clearPanels, onEquip } from './panels.js';
 
 // Pyodide is tried from a local copy first (see README), then the CDN.
@@ -628,6 +682,7 @@ window.drawScene = function (scene, json) {
       drawInfoPanel(details);
     }
     if (details.stage) statusLabel.textContent = `${details.stage} · Slain: ${details.cs}`;
+    if (scene === 'aftermath') return celebrate(details.enemy);
     if (scene === 'spoils') return showSpoils(details.spoils, details);
   });
 };

@@ -194,6 +194,7 @@ class Character:
     burning: int = 0  # rounds of fire damage left (Fire Spear)
     burn: int = 0  # damage per round while burning
     reeling: int = 0  # turns to lose (Dirty Trick, Wing Buffet)
+    bloodied: bool = False  # took damage this fight, which spoils a Flawless win
 
     @classmethod
     def create(cls, name, job, hero=False):
@@ -344,6 +345,9 @@ class Party:
     scrap: int = 0  # salvaged from old gear, spent at forges
     bag_changed: bool = False  # something went in since the bag was last offered
     in_fight: bool = False  # gear can't be changed mid-fight
+    trophies: dict = field(default_factory=dict)  # monster name -> trophies taken
+    relics: list = field(default_factory=list)  # full trophy sets: boons for everyone
+    rating_counts: dict = field(default_factory=dict)  # 'Flawless' -> wins rated so, for the notes
     smoke: bool = False  # Smoke Bomb: every strike misses this round
     shielded: bool = False  # Arcane Shield: damage is halved this round
 
@@ -370,7 +374,11 @@ def party_details(party, monster=None, active=None):
                'stages': [{'name': stage.name, 'fights': stage.fights,
                            'boss': BESTIARY[stage.boss].name} for stage in STAGES],
                'gold': party.gold, 'scrap': party.scrap, 'in_fight': party.in_fight,
-               'bag_size': BAG_SIZE}
+               'bag_size': BAG_SIZE, 'ratings': party.rating_counts,
+               'trophies': [{'name': trophy.name, 'have': party.trophies.get(monster_name, 0),
+                             'needed': trophy.needed, 'relic': trophy.relic.name,
+                             'describe': trophy.relic.describe()}
+                            for monster_name, trophy in TROPHIES.items()]}
     # For the party panel's Equip buttons: which bag items fit each slot.
     for member, view in zip(party.members, details['party']):
         for gear in view['gear']:
@@ -619,6 +627,8 @@ class Monster:
     signature_used: bool = False
     breath_timer: int = 0  # turns since Fire Breath
     cooldowns: dict = field(default_factory=dict)  # ability name -> turns left
+    rounds: int = 0  # how long the fight against it has lasted
+    overkill: bool = False  # the killing blow went well past what it needed
     max_health: int = 0  # filled in from health
 
     def __post_init__(self):
@@ -740,6 +750,7 @@ def wound(member, damage, you, them):
     """Take damage, narrate it, and announce it if this blow drops them."""
     was_standing = member.alive
     member.health -= damage
+    member.bloodied = member.bloodied or damage > 0
     narrate(member, you, them)
     if member.last_stand and member.health < 1:
         member.health = 1
@@ -1446,6 +1457,7 @@ def fight(party, monster, rng=random, ask=input, intro='', ambush=False):
     for member in party.members:
         member.cooldowns, member.used = {}, set()
         member.rallied = member.last_stand = member.hexed = member.burning = member.reeling = 0
+        member.bloodied = False
     party.in_fight = True
     try:
         if ambush:
@@ -1461,6 +1473,7 @@ def fight_rounds(party, monster, rng, ask):
     round_number = 0
     while party.alive and monster.health > 0:
         round_number += 1
+        monster.rounds = round_number
         for member in party.living:
             if monster.health <= 0:
                 break
@@ -1472,10 +1485,13 @@ def fight_rounds(party, monster, rng, ask):
                 narrate(member, 'You are still reeling and lose your turn.',
                         '{name} is still reeling and loses their turn.')
                 continue
+            before = monster.health
             if take_turn(member, party, monster, rng, ask):
                 end_round(party)
                 show_party('explore', party)
                 return False
+            if before > 0 and monster.health <= -monster.max_health * OVERKILL:
+                monster.overkill = True
         if monster.health > 0:
             monster_turn(party, monster, round_number, rng)
         else:
@@ -1549,14 +1565,16 @@ def level_up(member, rng=random, ask=input):
         choose_skill(member, rng, ask, count=2)
 
 
-def award_xp(party, monster, rng=random, ask=input):
-    """Returns the names of heroes who levelled up, for the spoils card."""
-    if not monster.xp:
+def award_xp(party, monster, rng=random, ask=input, bonus=0):
+    """Returns the names of heroes who levelled up, for the spoils card.
+    A bonus (for a Swift win) comes on top of the monster's XP."""
+    xp = monster.xp + bonus if monster.xp else 0
+    if not xp:
         return []
-    print(f'The party earns {monster.xp} XP.')
+    print(f'The party earns {xp} XP.')
     levelled = []
     for member in party.living:
-        member.xp += monster.xp
+        member.xp += xp
         while member.level < len(LEVEL_XP) and member.xp >= LEVEL_XP[member.level]:
             level_up(member, rng, ask)
             levelled.append(f'{member.name} reached level {member.level}')
@@ -1583,13 +1601,18 @@ def unlearned_boon_abilities(member):
     return [name for name in member.job.boon_abilities if name not in member.actions]
 
 
-def power_up(member, ability=None):
-    """Keep the hoard: a stat boon, plus a Boon Ability if one is left to learn."""
-    boon = BOONS[member.job.name]
+def grant(member, boon):
+    """A lasting bonus; any extra max HP or mana comes with it, filled."""
     old_max_health, old_max_mana = member.max_health, member.max_mana
     member.boons.append(boon)
     member.health += member.max_health - old_max_health
     member.mana += member.max_mana - old_max_mana
+
+
+def power_up(member, ability=None):
+    """Keep the hoard: a stat boon, plus a Boon Ability if one is left to learn."""
+    boon = BOONS[member.job.name]
+    grant(member, boon)
     narrate(member, f'You claim the hoard and gain [{boon.name}] ({boon.describe()}).',
             f'{{name}} claims the hoard and gains [{boon.name}] ({boon.describe()}).')
     if ability:
@@ -1643,6 +1666,8 @@ def boss_reward(party, stage_index, rng=random, ask=input):
             party.members = party.living + [recruit]
             print(f'{recruit.name} the {recruit.job.name} joins your party. '
                   'They seem almost grateful. Almost.')
+            for relic in party.relics:  # full trophy sets count for newcomers too
+                grant(recruit, relic)
             return
         print('Please select a valid option.')
 
@@ -1673,14 +1698,161 @@ def clear_stage(party, stage, rng=random, ask=input):
     show_party('aftermath', party, boss)
     print('')
     print(stage.boss_outro)
-    levelled = award_xp(party, boss, rng, ask)
+    # A boss's spoils card also animates each hero's XP and the gold total,
+    # so note where they started.
+    before = [(member, member.level, member.xp) for member in party.living]
+    gold_before = party.gold
+    ratings, bonus_xp, verdict = judge_victory(party, boss)
+    levelled = award_xp(party, boss, rng, ask, bonus_xp)
     gold = collect_gold(party, boss)
-    found = claim_boss_drop(party, boss, ask)
+    found, against = claim_boss_drop(party, boss, ask)
     bandages = find_bandages(party, boss, rng)
     show_party('spoils', party, spoils={
-        'monster': boss.name, 'xp': boss.xp, 'levelled': levelled, 'gold': gold,
-        'found': found, 'bandages': bandages, 'healing': {}})
+        'monster': boss.name, 'xp': boss.xp + bonus_xp if boss.xp else 0,
+        'levelled': levelled, 'gold': gold, 'found': found, 'bandages': bandages,
+        'healing': {}, 'ratings': ratings, 'verdict': verdict, 'trophy': None,
+        'boss': True, 'against': against, 'gold_before': gold_before,
+        'level_xp': LEVEL_XP,
+        'heroes': [{'name': member.name, 'job': member.job.name, 'level_before': level,
+                    'xp_before': xp, 'level': member.level, 'xp': member.xp}
+                   for member, level, xp in before]})
     return True
+
+
+# --- Victory ratings, the narrator's verdict and trophies -----------------
+# A win can be rated Flawless (nobody took damage), Swift (over quickly) or
+# Overkill (the killing blow went well past what it needed). Each pays a
+# little extra, the narrator has something to say about it, and a win with
+# two ratings or more makes a kobold give up a trophy towards a set.
+
+SWIFT_ROUNDS = 1  # rounds, or fewer, for a Swift win over a kobold
+SWIFT_BOSS_ROUNDS = 4
+TROPHY_RATINGS = 2  # ratings a win needs before a kobold gives up a trophy
+OVERKILL = 1 / 3  # the killing blow's excess damage, as a share of max HP
+
+
+def rate_victory(party, monster):
+    ratings = []
+    if not any(member.bloodied for member in party.members):
+        ratings.append('Flawless')
+    if monster.rounds <= (SWIFT_BOSS_ROUNDS if monster.boss else SWIFT_ROUNDS):
+        ratings.append('Swift')
+    if monster.overkill:
+        ratings.append('Overkill')
+    return ratings
+
+
+def judge_victory(party, monster):
+    """Rate the win and pay out its gold and scrap. Returns the ratings for
+    the spoils card, the bonus XP to award, and the narrator's verdict."""
+    ratings, bonus_xp = [], 0
+    for name in rate_victory(party, monster):
+        party.rating_counts[name] = party.rating_counts.get(name, 0) + 1
+        if name == 'Flawless':
+            gold = max(3, monster.gold // 2)
+            party.gold += gold
+            bonus, note = f'+{gold} gold', 'Not a scratch on anyone.'
+        elif name == 'Swift':
+            bonus_xp = max(2, round(monster.xp * 0.3))
+            bonus = f'+{bonus_xp} XP'
+            note = f'Over in {monster.rounds} round{"s" if monster.rounds > 1 else ""}.'
+        else:
+            scrap = 3 if monster.boss else 1
+            party.scrap += scrap
+            bonus, note = f'+{scrap} scrap', 'There is not much left of it.'
+        print(f'{name}! {note} {bonus}')
+        ratings.append({'name': name, 'bonus': bonus})
+    said = verdict(party, monster, [rating['name'] for rating in ratings])
+    print(said)
+    return ratings, bonus_xp, said
+
+
+VERDICTS = {  # what the narrator makes of a win, worst news first
+    'fallen': ("{name} won't be walking out of here. I'll add it to the tally.",
+               'One less mouth to feed. Sorry, {name}.',
+               '{name} fought bravely. And badly. Mostly badly.'),
+    'close': ('That was close. {name} looks like a dropped pie.',
+              '{name} is held together by spite and bandage lint at this point.',
+              'Still standing. {name}, mostly.'),
+    'perfect': ("Flawless, swift and messy. I'd clap, but I'm saving my hands for your funeral.",
+                "All three. Don't let it go to your head, there's a dragon down here.",
+                'Well. Even a broken lantern lights up once in a while.'),
+    'flawless': ("Not a scratch. I'll pretend I'm not impressed.",
+                 'Untouched. The kobold must have been having a bad day.',
+                 "Flawless. Enjoy it, it won't last."),
+    'overkill': ('You know it was already dead, right?',
+                 'There is enough left of it to fill a thimble. A small thimble.',
+                 'Subtle. Very subtle. Someone will have to repaint that wall.'),
+    'swift': ('That was quick. Did it trip?',
+              'Over before it finished its battle cry. Rude, but effective.',
+              'Fast. I barely had time to start betting against you.'),
+    'slog': ('That took {rounds} rounds. It nearly died of old age.',
+             "{rounds} rounds. I've seen faster funerals.",
+             'Got there in the end. Eventually. Finally.'),
+    'plain': ('Another one down. Only several hundred to go.',
+              "Adequate. I've seen worse. I've mostly seen worse.",
+              "It's dead and you're not. That's the whole job, really."),
+}
+
+
+def verdict(party, monster, ratings):
+    """Picked by how the fight went, then by creep score, so it rolls no dice."""
+    fallen = [member for member in party.members if member.bloodied and not member.alive]
+    weakest = min(party.living, key=lambda member: member.health / member.max_health)
+    if fallen:
+        key, name = 'fallen', fallen[0].name
+    elif weakest.health < weakest.max_health * 0.2:
+        key, name = 'close', weakest.name
+    else:
+        name = weakest.name
+        key = ('perfect' if len(ratings) == 3 else
+               'flawless' if 'Flawless' in ratings else
+               'overkill' if 'Overkill' in ratings else
+               'swift' if 'Swift' in ratings else
+               'slog' if monster.rounds >= 8 else 'plain')
+    lines = VERDICTS[key]
+    return lines[party.cs % len(lines)].format(name=name, rounds=monster.rounds)
+
+
+@dataclass(frozen=True)
+class Trophy:
+    name: str
+    needed: int  # trophies in a full set
+    relic: Item  # what a full set gives every hero in the party
+
+
+TROPHIES = {  # by the name of the kobold that gives it up
+    'Kobold Miner': Trophy("Miner's Pick", 3, Item('Rack of Picks', 'relic', attack=3)),
+    'Kobold Guardsman': Trophy("Guardsman's Buckle", 3,
+                               Item('Belt of Buckles', 'relic', max_health=20)),
+    'Kobold Heavy': Trophy("Heavy's Tusk", 2,
+                           Item('Tusk Necklace', 'relic', attack=3, max_health=10)),
+    'Kobold Shaman': Trophy("Shaman's Fetish", 2,
+                            Item('Fetish Bundle', 'relic', spell_power=10, max_health=10)),
+    'Kobold Dragonguard': Trophy('Dragonguard Scale', 2,
+                                 Item('Scale Cloak', 'relic', dodge=2, max_health=15)),
+}
+
+
+def claim_trophy(party, monster, ratings):
+    """A win with two ratings or more gives up a trophy, until its set is
+    full. Returns what the spoils card shows, or None."""
+    trophy = TROPHIES.get(monster.name)
+    have = party.trophies.get(monster.name, 0)
+    if not trophy or len(ratings) < TROPHY_RATINGS or have >= trophy.needed:
+        return None
+    have = party.trophies[monster.name] = have + 1
+    print(f'For a win like that, the kobold gives up a trophy: '
+          f'[{trophy.name}] ({have} of {trophy.needed}).')
+    if have < trophy.needed:
+        return {'text': f'{trophy.name} ({have} of {trophy.needed})', 'complete': False}
+    party.relics.append(trophy.relic)
+    for member in party.living:
+        grant(member, trophy.relic)
+    print(f'The set is complete! The [{trophy.relic.name}] gives the whole party '
+          f'{trophy.relic.describe()}.')
+    return {'text': f'{trophy.relic.name}: {trophy.relic.describe()} for everyone',
+            'complete': True}
 
 
 def collect_gold(party, monster):
@@ -1698,14 +1870,17 @@ def after_victory(party, monster, rng=random, ask=input, camp=True):
     show_party('aftermath', party, monster)
     print('Your enemy has fallen. You may move on.')
     print(f'Creep Score: {party.cs}')
-    levelled = award_xp(party, monster, rng, ask)
+    ratings, bonus_xp, verdict = judge_victory(party, monster)
+    levelled = award_xp(party, monster, rng, ask, bonus_xp)
     gold = collect_gold(party, monster)
     found = search_camp(party, monster, rng, ask) if camp else 'No camp to search'
+    trophy = claim_trophy(party, monster, ratings)
     bandages = find_bandages(party, monster, rng)
     healing = rest(party)
     drawn = show_party('spoils', party, spoils={
-        'monster': monster.name, 'xp': monster.xp, 'levelled': levelled, 'gold': gold,
-        'found': found, 'bandages': bandages, 'healing': healing})
+        'monster': monster.name, 'xp': monster.xp + bonus_xp, 'levelled': levelled,
+        'gold': gold, 'found': found, 'bandages': bandages, 'healing': healing,
+        'ratings': ratings, 'verdict': verdict, 'trophy': trophy})
     asked = offer_bandages(party, ask)
     if party.bag_changed and not drawn:
         open_bag(party, ask)
@@ -1929,10 +2104,11 @@ def fork(party, stage, kills, rng=random, ask=input):
 
 
 def claim_boss_drop(party, boss, ask=input):
-    """Returns what was found and where it went, for the spoils card."""
+    """Returns what was found and where it went, and how it compares with
+    what the claimant wears, for the spoils card."""
     drops = BOSS_DROPS.get(boss.name)
     if not drops or not party.alive:
-        return 'Nothing of worth'
+        return 'Nothing of worth', ''
     # Each class would get its own version, so you choose who claims it first.
     claimant = party.living[0]
     if len(party.living) > 1:
@@ -1948,9 +2124,20 @@ def claim_boss_drop(party, boss, ask=input):
     if slot:
         equip(claimant, slot, item)
         narrate(claimant, f'You equip the [{item.name}].', f'{{name}} equips the [{item.name}].')
-        return f'{item.name}: to {claimant.name}'
+        return f'{item.name}: to {claimant.name}', 'Fills an empty slot'
+    against = compare(item, claimant.equipment[slots_for(claimant, item)[0]])
     stow(party, item)
-    return f'{item.name}: into the bag'
+    return f'{item.name}: into the bag', against
+
+
+def compare(item, worn):
+    """How an item stacks up against one being worn, for the spoils card:
+    "+7 attack vs your Firebrand Sword"."""
+    if item.kind == 'trinket':
+        return f'Could replace your {worn.name}'
+    changes = [f'{getattr(item, stat) - getattr(worn, stat):+} {label}'
+               for stat, label in STAT_LABELS.items() if getattr(item, stat) != getattr(worn, stat)]
+    return f'{", ".join(changes)} vs your {worn.name}' if changes else f'The same as your {worn.name}'
 
 
 current_party = None  # the party being played, for the browser's Equip buttons

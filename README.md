@@ -109,6 +109,26 @@ splits three ways:
 
 Kobolds drop gold when they fall, and bosses drop a lot of it.
 
+Wins can earn ratings, each with a small bonus:
+
+| Rating | Earned when | Bonus |
+|---|---|---|
+| Flawless | Nobody took damage | Gold, half the kobold's own |
+| Swift | It fell in the first round (bosses: within 4) | 30% more XP |
+| Overkill | The killing blow went a third of its max HP past zero | 1 scrap (bosses: 3) |
+
+The narrator has something to say about every win, good or bad. A win with
+two ratings or more makes a kobold give up a trophy, and a full set gives the
+whole party a lasting bonus, recruits included:
+
+| Trophy | Set | Bonus |
+|---|---|---|
+| Miner's Pick | 3 | +3 attack |
+| Guardsman's Buckle | 3 | +20 max HP |
+| Heavy's Tusk | 2 | +3 attack, +10 max HP |
+| Shaman's Fetish | 2 | +10 spell power, +10 max HP |
+| Dragonguard Scale | 2 | +2 dodge, +15 max HP |
+
 Every hero also has a trinket slot:
 
 | Trinket | Effect |
@@ -145,8 +165,12 @@ buttons, number keys pick options, and a picture panel shows pixel-art
 portraits, health bars and mana for each fight. The newest turn is always at
 the top of the log, just under your choices, and its text arrives a line at a
 time so it can be followed (click the log or press any key to show the rest at
-once). After each fight a spoils card sums up the XP, gold, loot, bandages and
-healing. A party panel on the left has a
+once). Each fight gets its own block in the log. The killing blow bursts the
+enemy into pixels, then a pop-up stamps the win's ratings, gives the
+narrator's verdict and lists the XP, gold, loot, trophies, bandages and
+healing one by one; after a boss, each hero's XP bar fills (and levels up)
+and the gold counts up. If new gear went in the bag, the game waits for you to
+equip it before the next fight. A party panel on the left has a
 tab per hero with their stats, gear and skills (with cooldowns), and field
 notes on the right show the current enemy's abilities, your progress through
 the stages, and your supplies. On narrower screens the two panels open as

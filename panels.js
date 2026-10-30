@@ -141,7 +141,7 @@ function memberView(member) {
   });
   view.append(section('Skills', skills));
 
-  if (member.boons.length) view.append(section('Hoard boons', element('p', 'what', member.boons.join(', '))));
+  if (member.boons.length) view.append(section('Boons', element('p', 'what', member.boons.join(', '))));
   return view;
 }
 
@@ -209,7 +209,24 @@ export function drawInfoPanel(details) {
     }
     journey.append(row);
   });
-  blocks.push(section('Journey', journey, element('p', 'what', `Kobolds slain: ${details.cs}`)));
+  const tally = definitions(['Flawless', 'Swift', 'Overkill'].map(name =>
+    [`${name} wins`, details.ratings[name] || 0]));
+  blocks.push(section('Journey', journey, element('p', 'what', `Kobolds slain: ${details.cs}`), tally));
+
+  // Trophies come from wins with two ratings or more; a full set helps everyone.
+  const trophies = element('ul', 'skills');
+  details.trophies.forEach(trophy => {
+    const done = trophy.have >= trophy.needed;
+    const row = element('li', `skill ${done ? 'boon' : ''}`);
+    const top = element('div', 'skill-top');
+    top.append(element('span', 'skill-name', done ? trophy.relic : trophy.name),
+               element('span', done ? 'tag' : 'tag waiting', `${trophy.have} / ${trophy.needed}`));
+    row.append(top, element('div', 'what', done ? `${trophy.describe} for everyone`
+                                                : `Set: ${trophy.relic}, ${trophy.describe}`));
+    trophies.append(row);
+  });
+  blocks.push(section('Trophies', element('p', 'what', 'Kobolds give these up when beaten in style.'),
+                      trophies));
 
   const bag = element('ul', 'gear');
   if (details.bag.length) {

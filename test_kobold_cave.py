@@ -71,6 +71,13 @@ def give(member, item_key, slot=None):
     return party
 
 
+def slog(monster, party):
+    """A monster beaten the hard way, so the win earns no ratings."""
+    monster.rounds = 5
+    party.members[0].bloodied = True
+    return monster
+
+
 def turn(member, party, monster, rolls, *replies):
     return quietly(game.take_turn, member, party, monster, FakeRng(*rolls), answers(*replies))
 
@@ -363,7 +370,15 @@ class TrinketTests(unittest.TestCase):
         self.assertIn(game.ITEMS['hand_axe'], rogue.equipment.values())
         found = quietly(game.claim_boss_drop, party_of(rogue), game.spawn('kobold_leader'))
         self.assertEqual(rogue.trinket, game.ITEMS['junk_crown'])
-        self.assertEqual(found, 'Junk Crown: to Test')
+        self.assertEqual(found, ('Junk Crown: to Test', 'Fills an empty slot'))
+
+    def test_a_boss_drop_for_a_full_slot_is_compared_with_what_is_worn(self):
+        warrior = hero()
+        game.equip(warrior, 'Weapon', game.ITEMS['firebrand'])
+        party = party_of(warrior)
+        found, against = quietly(game.claim_boss_drop, party, game.spawn('kobold_warchief'))
+        self.assertEqual(found, "Warchief's War Axe: into the bag")
+        self.assertEqual(against, '+10 attack vs your Firebrand Sword')
 
     def test_in_a_party_you_choose_who_claims_the_prize(self):
         warrior, wizard = hero(), companion('wizard', 'Ysolde')
@@ -1077,6 +1092,57 @@ class ForkTests(unittest.TestCase):
         self.assertEqual(party.cs, 1)
 
 
+class VictoryTests(unittest.TestCase):
+    def test_one_huge_blow_earns_every_rating(self):
+        party, monster = party_of(hero(attack=1000)), kobold()
+        quietly(game.fight, party, monster, FakeRng(0), answers('attack'))
+        self.assertEqual(game.rate_victory(party, monster), ['Flawless', 'Swift', 'Overkill'])
+
+    def test_a_long_bloody_fight_earns_none(self):
+        party = party_of(hero())
+        self.assertEqual(game.rate_victory(party, slog(kobold(), party)), [])
+
+    def test_ratings_pay_gold_xp_and_scrap(self):
+        party, guard = party_of(hero()), game.spawn('kobold_guard')
+        guard.rounds, guard.overkill = 1, True
+        ratings, bonus_xp, _ = quietly(game.judge_victory, party, guard)
+        self.assertEqual([rating['name'] for rating in ratings], ['Flawless', 'Swift', 'Overkill'])
+        self.assertEqual((party.gold, bonus_xp, party.scrap), (3, 4, 1))
+        self.assertEqual(party.rating_counts, {'Flawless': 1, 'Swift': 1, 'Overkill': 1})
+
+    def test_the_narrator_picks_a_verdict_without_rolling_dice(self):
+        warrior = hero()
+        party = party_of(warrior)
+        self.assertIn(game.verdict(party, kobold(rounds=1), ['Flawless']),
+                      game.VERDICTS['flawless'])
+        warrior.health = 10
+        self.assertIn(game.verdict(party, kobold(rounds=1), ['Flawless']),
+                      [line.format(name='Test') for line in game.VERDICTS['close']])
+
+    def test_rated_wins_build_a_trophy_set_for_the_whole_party(self):
+        warrior, rogue = hero(), companion()
+        party = party_of(warrior, rogue)
+        attack = warrior.attack
+        for _ in range(3):
+            trophy = quietly(game.claim_trophy, party, game.spawn('kobold_miner'),
+                             ['Flawless', 'Swift'])
+        self.assertTrue(trophy['complete'])
+        self.assertEqual((warrior.attack, rogue.attack - companion().attack), (attack + 3, 3))
+        # The set is full, so no more picks; and one rating isn't enough for a trophy.
+        self.assertIsNone(quietly(game.claim_trophy, party, game.spawn('kobold_miner'),
+                                  ['Flawless', 'Swift']))
+        self.assertIsNone(quietly(game.claim_trophy, party, game.spawn('kobold_guard'),
+                                  ['Flawless']))
+
+    def test_recruits_get_the_full_sets_too(self):
+        party = party_of(hero())
+        party.relics.append(game.TROPHIES['Kobold Guardsman'].relic)
+        quietly(game.boss_reward, party, 0, FakeRng(0, 0, 0), answers('brann'))
+        recruit = party.members[1]
+        self.assertIn(game.TROPHIES['Kobold Guardsman'].relic, recruit.boons)
+        self.assertEqual(recruit.health, recruit.max_health)
+
+
 class FlowTests(unittest.TestCase):
     def setUp(self):
         self.stages, self.bestiary = game.STAGES, game.BESTIARY
@@ -1176,7 +1242,8 @@ class ShowHookTests(unittest.TestCase):
 
     def test_a_win_ends_with_a_spoils_card(self):
         party = party_of(hero())
-        quietly(game.after_victory, party, game.spawn('kobold_guard'), FakeRng(5, 2), answers())
+        guard = slog(game.spawn('kobold_guard'), party)
+        quietly(game.after_victory, party, guard, FakeRng(5, 2), answers())
         scene, details = self.scenes[-1]
         self.assertEqual(scene, 'spoils')
         spoils = json.loads(details)['spoils']
@@ -1203,10 +1270,10 @@ class ShowHookTests(unittest.TestCase):
     def test_the_panel_shows_how_often_gear_was_reforged(self):
         warrior = hero()
         blade = game.reforged(game.reforged(game.ITEMS['mithril_blade']))
-        game.equip(warrior, 'Sword', blade)
+        game.equip(warrior, 'Weapon', blade)
         game.show_party('explore', party_of(warrior))
         gear = json.loads(self.scenes[-1][1])['party'][0]['gear']
-        sword = next(slot for slot in gear if slot['slot'] == 'Sword')
+        sword = next(slot for slot in gear if slot['slot'] == 'Weapon')
         self.assertEqual((sword['name'], sword['describe']), ('Mithril Blade +2', '+23 attack'))
         self.assertEqual((sword['forged'], sword['forge_limit'], sword['forge_gains']),
                          (2, game.FORGE_LIMIT, '+8 attack'))
