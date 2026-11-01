@@ -1,1 +1,42 @@
-[]
+[
+ {
+  "name": "Austin",
+  "job": "Warrior",
+  "level": 3,
+  "recruits": [],
+  "won": false,
+  "stage": "Upper Mines",
+  "depth": 0,
+  "killer": "Kobold Leader",
+  "slain": 8,
+  "bosses": 0,
+  "ratings": 2,
+  "relics": 0,
+  "gold": 74,
+  "hoards": 0,
+  "fled": 0,
+  "grade": 42,
+  "tier": "Bronze",
+  "parts": [
+   [
+    "Kobolds slain",
+    24
+   ],
+   [
+    "Rated wins",
+    8
+   ],
+   [
+    "Hero level",
+    8
+   ],
+   [
+    "Gold found",
+    2
+   ]
+  ],
+  "player": "aelendt",
+  "issue": 3,
+  "date": "2026-11-01"
+ }
+]
