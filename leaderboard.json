@@ -58,6 +58,46 @@
   "date": "2026-11-02"
  },
  {
+  "name": "Frog",
+  "job": "Rogue",
+  "level": 2,
+  "recruits": [],
+  "won": false,
+  "stage": "Upper Mines",
+  "depth": 0,
+  "killer": "Kobold Leader",
+  "slain": 8,
+  "bosses": 0,
+  "ratings": 9,
+  "relics": 0,
+  "gold": 46,
+  "hoards": 0,
+  "fled": 0,
+  "grade": 65,
+  "tier": "Bronze",
+  "parts": [
+   [
+    "Kobolds slain",
+    24
+   ],
+   [
+    "Rated wins",
+    36
+   ],
+   [
+    "Hero level",
+    4
+   ],
+   [
+    "Gold found",
+    1
+   ]
+  ],
+  "player": "aelendt",
+  "issue": 5,
+  "date": "2026-11-02"
+ },
+ {
   "name": "Austin",
   "job": "Warrior",
   "level": 3,
