@@ -1,6 +1,64 @@
 [
  {
   "name": "Austin",
+  "job": "Wizard",
+  "level": 7,
+  "recruits": [
+   "Brann the Warrior"
+  ],
+  "won": true,
+  "stage": "The Hoard",
+  "depth": 2,
+  "killer": "",
+  "slain": 23,
+  "bosses": 3,
+  "ratings": 35,
+  "relics": 5,
+  "gold": 338,
+  "hoards": 1,
+  "fled": 0,
+  "grade": 416,
+  "tier": "Grandmaster",
+  "parts": [
+   [
+    "Kobolds slain",
+    69
+   ],
+   [
+    "Bosses slain",
+    60
+   ],
+   [
+    "Slew Cinderjaw",
+    20
+   ],
+   [
+    "Rated wins",
+    140
+   ],
+   [
+    "Trophy sets",
+    60
+   ],
+   [
+    "Hero level",
+    24
+   ],
+   [
+    "Gold found",
+    13
+   ],
+   [
+    "Kept the hoard",
+    30
+   ]
+  ],
+  "player": "aelendt",
+  "issue": 4,
+  "date": "2026-11-02"
+ },
+ {
+  "name": "Austin",
   "job": "Warrior",
   "level": 3,
   "recruits": [],
