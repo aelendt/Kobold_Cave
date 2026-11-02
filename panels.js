@@ -240,6 +240,7 @@ function memberView(member) {
     top.append(element('span', 'skill-name', skill.name));
     const tags = [];
     if (skill.kind === 'signature') tags.push('Signature');
+    if (skill.path) tags.push(skill.path);
     if (skill.kind === 'boon') tags.push('Boon');
     if (skill.mana) tags.push(`${skill.mana} mana`);
     tags.forEach(tag => top.append(element('span', 'tag', tag)));

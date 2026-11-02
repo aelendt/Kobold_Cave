@@ -2,13 +2,15 @@
 
 It answers the game's questions the way a sensible player would: it uses
 its skills, guards against announced moves, heals when hurt, picks its way
-through the tunnels, equips better gear and spends its gold and scrap. It is not a perfect player, so its win
+through the tunnels, equips better gear and spends its gold and scrap. It
+can favour one of each class's two paths. It is not a perfect player, so its win
 rates are best used to compare classes, or the same class before and after
 a change, rather than as the odds a person will see.
 
     python3 balance_bot.py                 # 200 runs of each class
     python3 balance_bot.py --runs 400 --hoard
     python3 balance_bot.py --job wizard
+    python3 balance_bot.py --path 1          # favour each class's first path
 
 Runs are seeded 0, 1, 2 and so on, so the same command gives the same
 numbers until the game changes.
@@ -25,11 +27,14 @@ import kobold_cave as game
 
 MAX_ANSWERS = 5000  # more than any real run needs; stops a bot stuck re-answering
 
-# Skills the bot learns first, best first.
+# Skills the bot learns first, best first, whichever path they're on.
 SKILL_ORDER = {
-    'Warrior': ('Cleave', 'Battle Cry', 'Shield Bash', 'Second Wind', 'Shield Wall'),
-    'Rogue': ('Twin Strike', 'Stunning Strike', 'Poison Blade', 'Smoke Bomb', 'Pickpocket'),
-    'Wizard': ('Fireball', 'Frost Bolt', 'Drain Life', 'Arcane Shield', 'Mend'),
+    'Warrior': ('Cleave', 'Riposte', 'Battle Cry', 'Reckless Swing', 'Shield Bash', 'Rampage',
+                'Fortify', 'Bloodlust', 'Second Wind', 'Shield Wall'),
+    'Rogue': ('Twin Strike', 'Stunning Strike', 'Mark for Death', 'Poison Blade', 'Eviscerate',
+              'Garrote', 'Ambush', 'Shadowstep', 'Smoke Bomb', 'Pickpocket'),
+    'Wizard': ('Fireball', 'Ignite', 'Frost Bolt', 'Scorch', 'Frost Nova', 'Drain Life',
+               'Combustion', 'Ice Armor', 'Arcane Shield', 'Mend'),
 }
 
 # Rough worth of a trinket's effect, in the same units as one point of attack.
@@ -40,9 +45,10 @@ EFFECT_VALUE = {'lifesteal': 18, 'lucky': 22, 'thorns': 15, 'fireward': 12, 'sat
 class Bot:
     """Stands in for input(): call it with a question, get back an answer."""
 
-    def __init__(self, job_key, rng, hoard=False):
+    def __init__(self, job_key, rng, hoard=False, path=None):
         # The bot's own dice, so its choices don't shift the game's rolls.
         self.job_key, self.rng, self.hoard = job_key, rng, hoard
+        self.path = path  # 1 or 2: the hero favours that path's skills and boon
         self.party = None
         self.monster = None  # the enemy in the current fight, see watch_game
         self.ways = []  # the ways on offered at the last split
@@ -62,10 +68,12 @@ class Bot:
         if 'Attack' in options:
             return self.combat(self.member_asked(question), options)
         if 'Which skill?' in question:
-            order = next(order for order in SKILL_ORDER.values() if options[0] in order)
-            return min(options, key=order.index)
+            return min(options, key=lambda name: self.skill_rank(self.member_asked(question),
+                                                                  name))
         if question.startswith('Free the prisoner'):
-            return options[-1] if self.hoard else options[0]
+            if not self.hoard:
+                return options[0]
+            return min(options[1:], key=lambda name: self.skill_rank(party.living[0], name))
         if question.startswith('Use a bandage?'):
             for option in options:
                 member = party.living[0] if option == 'Yes' else \
@@ -73,7 +81,7 @@ class Bot:
                 if member and member.health < member.max_health * 0.6:
                     return option
             return 'No'
-        if question.startswith('Mend whom?'):
+        if question.endswith('whom? [' + ' / '.join(options) + '] '):
             return (self.mend_target or party.living[0]).name
         if question.startswith('Who claims'):
             return options[0]
@@ -97,15 +105,24 @@ class Bot:
             return 'Press on'
         raise RuntimeError(f'The bot has no answer for: {question}')
 
+    def skill_rank(self, member, name):
+        """Lower is better: the favoured path's skills first (for the hero),
+        then the class's usual order."""
+        path = member.job.path_of(name)
+        favoured = member.hero and self.path and path is member.job.paths[self.path - 1]
+        order = SKILL_ORDER[member.job.name]
+        return (not favoured, order.index(name) if name in order else len(order))
+
     def member_asked(self, question):
         """Whose orders a combat menu wants: in a party it starts 'Name: '."""
         living = self.party.living
-        if len(living) == 1:
-            return living[0]
-        return next(member for member in living if question.startswith(f'{member.name}: '))
+        return next((member for member in living if question.startswith(f'{member.name}: ')),
+                    living[0])
 
     def ready(self, member, name):
         action = game.ACTIONS[name]
+        if name == 'Mana Surge' and member.mana >= member.max_mana:
+            return False  # the game won't let it waste a turn
         return not member.cooldowns.get(name) and member.mana >= action.mana \
             and not (action.once and name in member.used)
 
@@ -115,7 +132,9 @@ class Bot:
 
         monster, party = self.monster, self.party
         health = member.health / member.max_health
+        hurt = min(party.living, key=lambda m: m.health / m.max_health)
         warned = monster.charging  # a big move was announced last turn
+        sturdy = monster.health > member.attack * 3  # worth setting up
         if health < 0.35 and ready('Drink Vial'):
             return 'Drink Vial'
         job = member.job.name
@@ -124,37 +143,65 @@ class Bot:
                 return 'Last Stand'
             if health < 0.45 and ready('Second Wind'):
                 return 'Second Wind'
-            if warned and ready('Shield Bash'):
-                return 'Shield Bash'
-            if warned and len(party.living) > 1 and ready('Shield Wall'):
-                return 'Shield Wall'
-            moves = ('Execute', 'Battle Cry', 'Cleave', 'Shield Bash')
+            if warned:
+                for name in ('Shield Bash', 'Riposte', 'Fortify'):
+                    if ready(name):
+                        return name
+                if len(party.living) > 1 and ready('Shield Wall'):
+                    return 'Shield Wall'
+            if health < 0.7 and sturdy and ready('Bloodlust'):
+                return 'Bloodlust'
+            if health < 0.6 and ready('Rampage'):
+                return 'Rampage'
+            moves = ['Execute', 'Battle Cry', 'Cleave', 'Rampage', 'Shield Bash', 'Riposte']
+            if health > 0.5:
+                moves.insert(1, 'Reckless Swing')
         elif job == 'Rogue':
-            if warned and ready('Stunning Strike'):
-                return 'Stunning Strike'
-            if warned and ready('Smoke Bomb'):
-                return 'Smoke Bomb'
+            if monster.rounds == 1 and ready('Ambush'):
+                return 'Ambush'
+            if warned:
+                for name in ('Stunning Strike', 'Garrote', 'Smoke Bomb', 'Shadowstep'):
+                    if ready(name):
+                        return name
             if (monster.stunned or monster.dazed) and ready('Backstab'):
                 return 'Backstab'
             if monster.health <= monster.max_health * 0.3 and ready('Assassinate'):
                 return 'Assassinate'
-            moves = ('Backstab', 'Twin Strike', 'Poison Blade', 'Stunning Strike', 'Pickpocket')
+            if sturdy and not monster.marked and ready('Mark for Death'):
+                return 'Mark for Death'
+            if game.afflictions(monster) >= 2 and ready('Eviscerate'):
+                return 'Eviscerate'
+            moves = ['Backstab', 'Twin Strike', 'Garrote', 'Stunning Strike', 'Eviscerate',
+                     'Pickpocket']
+            if sturdy and not monster.poison_rounds:
+                moves.insert(1, 'Poison Blade')
         else:
-            hurt = min(party.living, key=lambda m: m.health / m.max_health)
             if monster.boss and not monster.stunned and ready('Time Stop'):
                 return 'Time Stop'
-            if warned and ready('Arcane Shield'):
-                return 'Arcane Shield'
+            if warned:
+                for name in ('Frost Nova', 'Arcane Shield'):
+                    if ready(name):
+                        return name
             if hurt.health < hurt.max_health * 0.4 and ready('Mend'):
                 self.mend_target = hurt
                 return 'Mend'
+            if hurt.health < hurt.max_health * 0.6 and not hurt.ice_armor \
+                    and monster.boss and ready('Ice Armor'):
+                self.mend_target = hurt
+                return 'Ice Armor'
             if ready('Meteor'):
                 return 'Meteor'
+            if monster.burn_rounds >= 2 and ready('Combustion'):
+                return 'Combustion'
+            if not monster.burn_rounds and monster.health > member.spell_power and ready('Ignite'):
+                return 'Ignite'
             if health < 0.5 and ready('Drain Life'):
                 return 'Drain Life'
             if member.mana <= 1 and monster.health > member.spell_power and ready('Mana Surge'):
                 return 'Mana Surge'
-            moves = ('Fireball', 'Arcane Shield', 'Frost Bolt', 'Drain Life', 'Mana Surge')
+            moves = ['Fireball', 'Arcane Shield', 'Frost Bolt', 'Drain Life', 'Ignite',
+                     'Frost Nova', 'Mana Surge']
+            moves.insert(0 if monster.burn_rounds else 2, 'Scorch')
         return next((name for name in moves if ready(name)), 'Attack')
 
     def choose_way(self):
@@ -267,10 +314,10 @@ def watch_game(bot):
         game.fight_rounds, game.roll_ways = fight_rounds, roll_ways
 
 
-def play_run(job_key, seed, hoard=False):
+def play_run(job_key, seed, hoard=False, path=None):
     """Play one run quietly. Returns (won, the record the hall would keep)."""
     rng = random.Random(seed)
-    bot = Bot(job_key, random.Random(-1 - seed), hoard)
+    bot = Bot(job_key, random.Random(-1 - seed), hoard, path)
     hero = game.Character.create('Bot', game.JOBS[job_key], hero=True)
     bot.party = game.Party([hero])
     with watch_game(bot), redirect_stdout(StringIO()):
@@ -284,13 +331,15 @@ def main():
                                                  'win rates by class.')
     parser.add_argument('--runs', type=int, default=200, help='runs per class (default 200)')
     parser.add_argument('--job', choices=list(game.JOBS), help='only this class')
+    parser.add_argument('--path', type=int, choices=[1, 2],
+                        help="favour each class's first or second path (default: neither)")
     parser.add_argument('--hoard', action='store_true',
                         help='keep the hoard after each boss instead of freeing the prisoner')
     args = parser.parse_args()
     for job_key in [args.job] if args.job else list(game.JOBS):
         wins, killers, grades, tiers = 0, Counter(), [], Counter()
         for seed in range(args.runs):
-            won, record = play_run(job_key, seed, args.hoard)
+            won, record = play_run(job_key, seed, args.hoard, args.path)
             wins += won
             grades.append(record['grade'])
             tiers[record['tier']] += 1

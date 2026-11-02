@@ -16,7 +16,7 @@ MAX_PARTY = 3
 BAG_SIZE = 8  # spare items the party can carry; the oldest falls out when it's full
 FORGE_LIMIT = 3  # how many times one item can be reforged
 LEVEL_XP = (0, 50, 120, 220, 350, 520, 720, 950)  # total XP needed to reach each level
-SKILL_LEVELS = (2, 4)  # level-ups that also teach a basic skill (1 of 2 offered)
+SKILL_LEVELS = (2, 3, 4, 5, 6)  # level-ups that also teach a skill (1 of 2, one per path)
 BOON_WARMUP = 2  # rounds at the start of each fight before Boon Abilities can be used
 
 
@@ -139,6 +139,15 @@ BOONS = {
 # --- Jobs -----------------------------------------------------------------
 
 @dataclass(frozen=True)
+class Path:
+    """One of a class's two playstyles: five skills and a Boon Ability."""
+    name: str
+    blurb: str
+    skills: tuple
+    boon: str
+
+
+@dataclass(frozen=True)
 class Job:
     name: str
     health: int
@@ -148,30 +157,60 @@ class Job:
     spell_power: int = 0
     mana: int = 0
     actions: tuple = ()  # signature moves every hero of this class knows
-    skills: tuple = ()  # basic skills; each run starts with 1 of 3 random picks
-    boon_abilities: tuple = ()  # powerful skills learned by keeping a boss's hoard
+    paths: tuple = ()  # two Paths, each a playstyle with its own skills and Boon Ability
     growth: object = None  # Item of stats gained per level (mana per two levels)
+
+    @property
+    def skills(self):
+        """Every basic skill, from both paths."""
+        return tuple(name for path in self.paths for name in path.skills)
+
+    @property
+    def boon_abilities(self):
+        """Powerful skills learned by keeping a boss's hoard, one per path."""
+        return tuple(path.boon for path in self.paths)
+
+    def path_of(self, name):
+        return next((path for path in self.paths if name in path.skills or name == path.boon),
+                    None)
 
 
 JOBS = {
     'warrior': Job('Warrior', health=150, attack=15, dodge=3,
                    slots={'Weapon': ('sword',), 'Shield': ('shield',), 'Trinket': ('trinket',)},
-                   skills=('Cleave', 'Shield Bash', 'Shield Wall', 'Second Wind', 'Battle Cry'),
-                   boon_abilities=('Execute', 'Last Stand'),
+                   paths=(Path('Guardian', 'Shield up: protect the party and punish whoever '
+                                           'hits you.',
+                               ('Shield Bash', 'Shield Wall', 'Riposte', 'Fortify', 'Second Wind'),
+                               'Last Stand'),
+                          Path('Berserker', 'Hit harder the more it hurts. Trade safety for '
+                                            'damage.',
+                               ('Cleave', 'Battle Cry', 'Reckless Swing', 'Bloodlust', 'Rampage'),
+                               'Execute')),
                    growth=Item('Level', 'growth', attack=3, max_health=25)),
     'rogue': Job('Rogue', health=120, attack=12, dodge=4,
                  slots={'Main hand': ('sword',), 'Off hand': ('sword', 'dagger'),
                         'Trinket': ('trinket',)},
                  actions=('Flee',),
-                 skills=('Stunning Strike', 'Poison Blade', 'Smoke Bomb', 'Twin Strike',
-                         'Pickpocket'),
-                 boon_abilities=('Backstab', 'Assassinate'),
+                 paths=(Path('Assassin', 'Mark a target, then end it in one huge blow.',
+                             ('Twin Strike', 'Mark for Death', 'Shadowstep', 'Ambush',
+                              'Eviscerate'),
+                             'Assassinate'),
+                        Path('Trickster', "Stuns, poison and dirty tricks. Never let the enemy "
+                                          "act.",
+                             ('Stunning Strike', 'Poison Blade', 'Smoke Bomb', 'Garrote',
+                              'Pickpocket'),
+                             'Backstab')),
                  growth=Item('Level', 'growth', attack=1, max_health=10)),
     'wizard': Job('Wizard', health=130, attack=10, dodge=3,
                   slots={'Staff': ('staff',), 'Shield': ('shield',), 'Trinket': ('trinket',)},
                   spell_power=60, mana=5, actions=('Mana Surge',),
-                  skills=('Fireball', 'Mend', 'Frost Bolt', 'Arcane Shield', 'Drain Life'),
-                  boon_abilities=('Meteor', 'Time Stop'),
+                  paths=(Path('Pyromancer', 'Set it alight, keep it burning, then make it '
+                                            'blow.',
+                              ('Fireball', 'Ignite', 'Scorch', 'Combustion', 'Drain Life'),
+                              'Meteor'),
+                         Path('Warden', 'Frost and wards: freeze the enemy, shield the party.',
+                              ('Frost Bolt', 'Arcane Shield', 'Mend', 'Ice Armor', 'Frost Nova'),
+                              'Time Stop')),
                   growth=Item('Level', 'growth', spell_power=5, max_health=10, mana=1)),
 }
 
@@ -198,6 +237,13 @@ class Character:
     burning: int = 0  # rounds of fire damage left (Fire Spear)
     burn: int = 0  # damage per round while burning
     reeling: int = 0  # turns to lose (Dirty Trick, Wing Buffet)
+    riposte: bool = False  # Riposte: counter any blow this round
+    exposed: int = 0  # Reckless Swing: takes 25% more damage until their next turn
+    bloodlust: int = 0  # rounds of Bloodlust left: blows heal for a quarter
+    fortified: int = 0  # rounds of Fortify left: takes 25% less damage
+    ice_armor: int = 0  # rounds of Ice Armor left: takes 40% less damage
+    hidden: bool = False  # Shadowstep: out of sight this round
+    primed: bool = False  # Shadowstep: the next weapon blow does double
     bloodied: bool = False  # took damage this fight, which spoils a Flawless win
 
     @classmethod
@@ -254,16 +300,19 @@ def print_job_stats(job):
         print(f'       Mana: {job.mana}')
     if job.actions:
         print(f'Special ATK: {", ".join(job.actions)}')
-    print(f'     Skills: {", ".join(job.skills)}')
-    print(f'      Boons: {", ".join(job.boon_abilities)}')
+    for path in job.paths:
+        print(f'{path.name:>11}: {path.blurb}')
+        print(f'{"":>11}  {", ".join(path.skills)}; Boon: {path.boon}')
     print(f'       Gear: {" & ".join(job.slots)}')
 
 
 def job_view(job):
     return {'name': job.name, 'health': job.health, 'attack': job.attack,
             'dodge': job.dodge, 'mana': job.mana,
-            'special': ', '.join(job.actions) or None, 'skills': list(job.skills),
-            'boon_abilities': list(job.boon_abilities), 'gear': list(job.slots)}
+            'special': ', '.join(job.actions) or None,
+            'paths': [{'name': path.name, 'blurb': path.blurb, 'skills': list(path.skills),
+                       'boon': path.boon} for path in job.paths],
+            'gear': list(job.slots)}
 
 
 def hero_view(character):
@@ -297,7 +346,9 @@ def skill_view(member, name):
     action = ACTIONS[name]
     kind = ('signature' if name in member.job.actions else
             'boon' if name in member.job.boon_abilities else 'skill')
-    return {'name': name, 'kind': kind, 'description': action.description,
+    path = member.job.path_of(name)
+    return {'name': name, 'kind': kind, 'path': path.name if path else '',
+            'description': action.description,
             'mana': action.mana, 'waiting': member.cooldowns.get(name, 0),
             'used': action.once and name in member.used}
 
@@ -306,12 +357,21 @@ def hero_effects(member):
     return [label for label, on in (('Hexed', member.hexed), ('Burning', member.burning),
                                     ('Reeling', member.reeling),
                                     ('Battle Cry', member.rallied),
-                                    ('Last Stand', member.last_stand)) if on]
+                                    ('Last Stand', member.last_stand),
+                                    ('Riposte', member.riposte), ('Exposed', member.exposed),
+                                    ('Bloodlust', member.bloodlust),
+                                    ('Fortified', member.fortified),
+                                    ('Ice Armor', member.ice_armor),
+                                    ('Hidden', member.hidden), ('Primed', member.primed)) if on]
 
 
 def monster_effects(monster):
     effects = [label for label, on in (('Stunned', monster.stunned),
                                        ('Poisoned', monster.poison_rounds),
+                                       ('Burning', monster.burn_rounds),
+                                       ('Marked', monster.marked),
+                                       ('Silenced', monster.silenced),
+                                       ('Chilled', monster.chilled),
                                        ('Shield Up', monster.guarding), ('Rallied', monster.fury),
                                        ('War Drums', monster.enraged),
                                        ('Berserk', monster.berserk)) if on]
@@ -635,6 +695,11 @@ class Monster:
     poison: int = 0  # damage per round from Poison Blade
     poison_rounds: int = 0
     guarding: bool = False  # Shield Up: takes half damage until its next turn
+    marked: int = 0  # Mark for Death: turns left taking 30% more from the party
+    silenced: int = 0  # Garrote: turns left with no abilities or big moves
+    chilled: int = 0  # Frost Nova: turns left hitting 25% softer
+    burn: int = 0  # Ignite: damage per turn while burning
+    burn_rounds: int = 0
     fury: int = 0  # Rally: strikes left at +50%
     enraged: int = 0  # War Drums: turns left at +30% attack
     berserk: bool = False
@@ -810,18 +875,41 @@ def dealt(member, monster, damage):
         damage *= 0.5
     if monster.boss and member.has('bossbane'):
         damage *= 1.15
+    if monster.marked:
+        damage *= 1.3
     damage = round(damage)
     if member.has('lifesteal') and damage > 0:
         healed = heal(member, round(damage * 0.15))
         if healed:
             narrate(member, f'Your fang drinks {healed} HP.', f"{{name}}'s fang drinks {healed} HP.")
+    if member.bloodlust and damage > 0:
+        healed = heal(member, round(damage * 0.25))
+        if healed:
+            narrate(member, f'The blood heals you for {healed} HP.',
+                    f'The blood heals {{name}} for {healed} HP.')
     return damage
 
 
+def softened(member, damage):
+    """Damage a blow does to a hero after Ice Armor and Fortify, or after
+    Reckless Swing has left them open."""
+    if member.ice_armor:
+        damage *= 0.6
+    if member.fortified:
+        damage *= 0.75
+    if member.exposed:
+        damage *= 1.25
+    return round(damage)
+
+
 def strike(member, monster, damage, you, them):
-    """A weapon blow. Battle Cry makes these 50% stronger."""
+    """A weapon blow. Battle Cry makes these 50% stronger; after Shadowstep
+    the next one does double."""
     if member.rallied:
         damage = round(damage * 1.5)
+    if member.primed:
+        member.primed = False
+        damage *= 2
     damage = dealt(member, monster, damage)
     monster.health -= damage
     narrate(member, you.format(target=monster.called, damage=damage),
@@ -893,6 +981,44 @@ def last_stand(member, party, monster, rng, ask):
             '{name} plants their feet. Nothing will drop them for two rounds.')
 
 
+def riposte(member, party, monster, rng, ask):
+    member.defending = member.riposte = True
+    narrate(member, 'You set your feet and wait for it. Anything that comes at you gets '
+                    'turned back.',
+            '{name} sets their feet, ready to riposte.')
+
+
+def fortify(member, party, monster, rng, ask):
+    for ally in party.living:
+        ally.fortified = 2
+    narrate(member, 'You bark the party into a shield line. Everyone takes 25% less damage '
+                    'this round and next.',
+            '{name} pulls the party into a shield line. Everyone takes 25% less damage '
+            'this round and next.')
+
+
+def reckless_swing(member, party, monster, rng, ask):
+    strike(member, monster, weapon_roll(member, 2, rng),
+           'You swing with everything and no thought for defence: {damage} damage to {target}.',
+           '{name} swings wild for {damage} damage to {target}.')
+    member.exposed = 1
+
+
+def bloodlust(member, party, monster, rng, ask):
+    member.bloodlust = 3
+    strike(member, monster, weapon_roll(member, 1, rng),
+           'You taste blood. {damage} damage to {target}, and every blow heals you for '
+           'three rounds.',
+           '{name} goes into a bloodlust: {damage} damage to {target}.')
+
+
+def rampage(member, party, monster, rng, ask):
+    missing = 1 - max(0, member.health) / member.max_health
+    strike(member, monster, weapon_roll(member, 1 + missing, rng),
+           'Every wound you carry goes into the blow: {damage} damage to {target}.',
+           '{name} rampages into {target} for {damage} damage.')
+
+
 # Rogue
 
 def flee(member, party, monster, rng, ask):
@@ -958,6 +1084,58 @@ def assassinate(member, party, monster, rng, ask):
            '{name} goes for the throat of {target} for {damage} damage.')
     if finishing:
         print('A killing blow, or near enough.')
+
+
+def mark_for_death(member, party, monster, rng, ask):
+    strike(member, monster, weapon_roll(member, 0.5, rng),
+           'You nick {target} for {damage} damage and mark it. The party deals 30% more to it '
+           'for 3 turns.',
+           '{name} marks {target} for death ({damage} damage). The party deals 30% more to it.')
+    monster.marked = 3
+
+
+def shadowstep(member, party, monster, rng, ask):
+    member.hidden = member.primed = True
+    narrate(member, 'You step into the shadows. Nothing can find you this round, and your '
+                    'next blow does double.',
+            '{name} steps into the shadows. Their next blow does double.')
+
+
+def ambush(member, party, monster, rng, ask):
+    if monster.rounds > 1:
+        narrate(member, 'Too late for an ambush; it has seen you.',
+                'Too late for {name} to ambush it.')
+        return RETRY
+    strike(member, monster, weapon_roll(member, 2, rng),
+           'You strike before {target} knows you are there: {damage} damage.',
+           '{name} strikes from nowhere for {damage} damage.')
+
+
+def afflictions(monster):
+    """How many things are wrong with a monster, for Eviscerate."""
+    return sum(bool(on) for on in (monster.stunned or monster.dazed, monster.poison_rounds,
+                                   monster.marked, monster.burn_rounds, monster.chilled,
+                                   monster.silenced))
+
+
+def eviscerate(member, party, monster, rng, ask):
+    wounds = afflictions(monster)
+    strike(member, monster, weapon_roll(member, 1 + 0.5 * wounds, rng),
+           'You open {target} up for {damage} damage.',
+           '{name} eviscerates {target} for {damage} damage.')
+    if wounds:
+        print(f'It was already in a bad way ({wounds} affliction{"s" if wounds > 1 else ""}).')
+
+
+def garrote(member, party, monster, rng, ask):
+    strike(member, monster, weapon_roll(member, 0.75, rng),
+           'You loop a wire round the throat of {target}: {damage} damage, and it can only '
+           'swing for 2 turns.',
+           '{name} garrotes {target} for {damage} damage. It can only swing for 2 turns.')
+    monster.silenced = 2
+    if monster.charging:
+        print(f'No {monster.charging} this time.')
+        monster.charging = ''
 
 
 # Wizard
@@ -1042,6 +1220,47 @@ def time_stop(member, party, monster, rng, ask):
     stun(monster, rng, turns=2, resistible=False)
 
 
+def ignite(member, party, monster, rng, ask):
+    monster.burn, monster.burn_rounds = round(member.spell_power * 0.25), 3
+    print(f'{capitalised(monster.called)} catches fire. It will burn for {monster.burn} '
+          'damage a turn for 3 turns.')
+
+
+def scorch(member, party, monster, rng, ask):
+    burning = monster.burn_rounds > 0
+    damage = dealt(member, monster, member.spell_power * (1.2 if burning else 0.6))
+    monster.health -= damage
+    print(f'A lash of flame scorches {monster.called} for {damage} damage.'
+          + (' It was already burning.' if burning else ''))
+
+
+def combustion(member, party, monster, rng, ask):
+    if not monster.burn_rounds:
+        print(f'{capitalised(monster.called)} is not burning. Nothing to set off.')
+        return RETRY
+    damage = dealt(member, monster, monster.burn * monster.burn_rounds * 1.5)
+    monster.health -= damage
+    monster.burn = monster.burn_rounds = 0
+    print(f'The flames on {monster.called} explode for {damage} damage.')
+
+
+def ice_armor(member, party, monster, rng, ask):
+    target = choose_ally(party, ask, 'Ice Armor on whom?')
+    target.ice_armor = 3
+    narrate(target, 'Ice closes over you. You take 40% less damage for 3 rounds.',
+            'Ice closes over {name}. They take 40% less damage for 3 rounds.')
+
+
+def frost_nova(member, party, monster, rng, ask):
+    damage = dealt(member, monster, member.spell_power * 0.3)
+    monster.health -= damage
+    monster.chilled = 3
+    print(f'Frost bursts over {monster.called} for {damage} damage. It hits 25% softer '
+          'for 3 turns.')
+    if monster.health > 0:
+        stun(monster, rng)
+
+
 @dataclass(frozen=True)
 class Action:
     name: str
@@ -1066,6 +1285,16 @@ ACTIONS = {action.name: action for action in (
     Action('Battle Cry', battle_cry, 'The whole party hits 50% harder this round and next. '
                                      'Every 3 rounds.', cooldown=3),
     # Warrior Boon Abilities
+    Action('Riposte', riposte, 'Guard, and turn any blow at you back for 1.5x damage this '
+                               'round. Every 3 rounds.', cooldown=3),
+    Action('Fortify', fortify, 'The whole party takes 25% less damage this round and next. '
+                               'Every 4 rounds.', cooldown=4),
+    Action('Reckless Swing', reckless_swing, 'Double damage, but you take 25% more until your '
+                                             'next turn. Every 2 rounds.', cooldown=2),
+    Action('Bloodlust', bloodlust, 'A blow, then for 3 rounds your blows heal you for a '
+                                   'quarter of their damage. Every 5 rounds.', cooldown=5),
+    Action('Rampage', rampage, 'A blow that grows with your wounds: up to double at death\'s '
+                               'door. Every 3 rounds.', cooldown=3),
     Action('Execute', execute, 'A blow that adds a third of the damage the enemy has already '
                                'taken. Every 4 rounds.', cooldown=4),
     Action('Last Stand', last_stand, 'Nothing can drop you below 1 HP for two rounds. '
@@ -1082,6 +1311,17 @@ ACTIONS = {action.name: action for action in (
            cooldown=2),
     Action('Pickpocket', pickpocket, 'A normal hit that also steals a roll of bandages. '
                                      'Once per fight.', once=True),
+    Action('Mark for Death', mark_for_death, 'A light cut that marks the enemy: the party '
+                                             'deals 30% more to it for 3 turns. Every 4 rounds.',
+           cooldown=4),
+    Action('Shadowstep', shadowstep, 'Vanish this round, and your next blow does double. '
+                                     'Every 3 rounds.', cooldown=3),
+    Action('Ambush', ambush, 'Double damage, in the first round of a fight only.', once=True),
+    Action('Eviscerate', eviscerate, 'A blow that does 50% more for each thing wrong with the '
+                                     'enemy (stunned, poisoned, marked, burning...). '
+                                     'Every 3 rounds.', cooldown=3),
+    Action('Garrote', garrote, 'A light hit, and for 2 turns the enemy can only swing: no '
+                               'abilities, no big moves. Every 4 rounds.', cooldown=4),
     # Rogue Boon Abilities
     Action('Backstab', backstab, 'Double damage, quadruple against a stunned enemy. '
                                  'Every 4 rounds.', cooldown=4),
@@ -1099,6 +1339,18 @@ ACTIONS = {action.name: action for action in (
            mana=1, cooldown=2),
     Action('Drain Life', drain_life, 'Damage the enemy and heal yourself for half of it.',
            mana=1),
+    Action('Ignite', ignite, 'Set the enemy burning for a quarter of your spell power a turn, '
+                             'for 3 turns.', mana=1),
+    Action('Scorch', scorch, 'A lash of flame: 0.6x spell power, double against a burning '
+                             'enemy.', mana=1),
+    Action('Combustion', combustion, 'Set off the flames on a burning enemy: all the burn '
+                                     'still to come, at once, plus half again. Every 3 rounds.',
+           mana=1, cooldown=3),
+    Action('Ice Armor', ice_armor, 'You or an ally take 40% less damage for 3 rounds. '
+                                   'Every 3 rounds.', mana=1, cooldown=3),
+    Action('Frost Nova', frost_nova, 'A burst of frost: light damage, the enemy hits 25% softer '
+                                     'for 3 turns and may freeze. Costs 2 mana. Every 3 rounds.',
+           mana=2, cooldown=3),
     # Wizard Boon Abilities
     Action('Meteor', meteor, 'Double spell power, guaranteed. Costs 2 mana. Every 3 rounds.',
            mana=2, cooldown=3),
@@ -1111,6 +1363,8 @@ def monster_damage(monster, rng, scale=1.0):
     damage = monster.attack * scale
     if monster.enraged:
         damage *= 1.3
+    if monster.chilled:
+        damage *= 0.75
     if monster.fury:
         damage *= 1.5
         monster.fury -= 1
@@ -1122,6 +1376,16 @@ def monster_strikes(target, monster, rng, halved=False, scale=1.0, parry=True, d
     damage = monster_damage(monster, rng, scale)
     if halved:
         damage //= 2
+    if target.hidden:
+        narrate(target, f'{capitalised(monster.called)} swings at shadows. You are not there.',
+                f'{capitalised(monster.called)} swings at shadows. {{name}} is not there.')
+        return False
+    if target.riposte and parry:
+        counter = dealt(target, monster, target.attack * 1.5)
+        monster.health -= counter
+        narrate(target, f'You turn the blow aside and riposte for {counter} damage.',
+                f'{{name}} turns the blow aside and ripostes for {counter} damage.')
+        return False
     if target.defending and parry:
         roll = rng.randint(1, 10)
         debug(f'Defend Roll: {roll}')
@@ -1162,6 +1426,7 @@ def landed(target, monster, damage, rng):
     """A blow that got through parry and dodge. Returns True if it hurt."""
     if lucky(target, rng):
         return False
+    damage = softened(target, damage)
     hit(target, damage)
     if target.has('thorns'):
         thorns = round(damage * 0.25)
@@ -1172,20 +1437,25 @@ def landed(target, monster, damage, rng):
 
 
 def target_of(party, rng):
-    """Shield Wall draws every blow; otherwise the monster picks at random."""
+    """Shield Wall draws every blow; otherwise the monster picks at random
+    from whoever it can see (if it can see nobody, it swings at shadows)."""
     walls = [member for member in party.living if member.shield_wall]
-    return walls[0] if walls else pick(party.living, rng)
+    seen = [member for member in party.living if not member.hidden] or party.living
+    return walls[0] if walls else pick(seen, rng)
 
 
 def area_attack(party, monster, base, rng, you, them, dodgeable=False, fire=False):
     """Hits every hero. Defending or Arcane Shield halves it."""
     for member in party.living:
+        if member.hidden:
+            narrate(member, 'You are nowhere to be seen.', '{name} is nowhere to be seen.')
+            continue
         if dodgeable and member.dodge + rng.randint(-2, 3) >= 4:
             narrate(member, 'You leap clear.', '{name} leaps clear.')
             continue
         if lucky(member, rng):
             continue
-        damage = round(base) + rng.randint(-3, 3)
+        damage = softened(member, round(base) + rng.randint(-3, 3))
         if party.shielded:
             damage //= 2
         if member.defending:
@@ -1339,8 +1609,14 @@ def wind_up(monster, name):
 
 
 def monster_act(party, monster, rng):
-    """Pick and perform the monster's move for this turn."""
+    """Pick and perform the monster's move for this turn. A silenced monster
+    can only swing."""
     half = monster.health <= monster.max_health * 0.5
+    if monster.silenced:
+        for _ in range(monster.attacks):
+            if party.alive and monster.health > 0:
+                monster_strikes(target_of(party, rng), monster, rng, halved=party.shielded)
+        return
     if monster.signature == 'Berserk' and not monster.berserk \
             and monster.health <= monster.max_health * 0.3:
         monster.berserk, monster.attacks = True, 3
@@ -1377,7 +1653,11 @@ def end_round(party):
     """Clear this round's effects and count down cooldowns."""
     party.smoke = party.shielded = False
     for member in party.members:
-        member.defending = member.shield_wall = False
+        member.defending = member.shield_wall = member.riposte = member.hidden = False
+        member.exposed = max(0, member.exposed - 1)
+        member.bloodlust = max(0, member.bloodlust - 1)
+        member.fortified = max(0, member.fortified - 1)
+        member.ice_armor = max(0, member.ice_armor - 1)
         member.rallied = max(0, member.rallied - 1)
         member.last_stand = max(0, member.last_stand - 1)
         member.hexed = max(0, member.hexed - 1)
@@ -1391,6 +1671,10 @@ def monster_turn(party, monster, round_number, rng):
         monster.poison_rounds -= 1
         monster.health -= monster.poison
         print(f'Poison burns through {monster.called} for {monster.poison} damage.')
+    if monster.burn_rounds:
+        monster.burn_rounds -= 1
+        monster.health -= monster.burn
+        print(f'{capitalised(monster.called)} burns for {monster.burn} damage.')
     for member in party.living:
         if member.burning:
             member.burning -= 1
@@ -1415,6 +1699,9 @@ def monster_turn(party, monster, round_number, rng):
     else:
         monster_act(party, monster, rng)
     monster.enraged = max(0, monster.enraged - 1)
+    monster.marked = max(0, monster.marked - 1)
+    monster.silenced = max(0, monster.silenced - 1)
+    monster.chilled = max(0, monster.chilled - 1)
     end_round(party)
 
 
@@ -1476,6 +1763,8 @@ def fight(party, monster, rng=random, ask=input, intro='', ambush=False):
                             if name in member.job.boon_abilities}
         member.used = set()
         member.rallied = member.last_stand = member.hexed = member.burning = member.reeling = 0
+        member.exposed = member.bloodlust = member.fortified = member.ice_armor = 0
+        member.riposte = member.hidden = member.primed = False
         member.bloodied = False
     party.in_fight = True
     try:
@@ -1541,9 +1830,25 @@ def game_over(party):
 
 
 def offer_skills(member, count, rng):
-    """`count` different basic skills this hero doesn't know yet, at random."""
-    pool = [name for name in member.job.skills if name not in member.actions]
-    return [pool.pop(rng.randint(0, len(pool) - 1)) for _ in range(min(count, len(pool)))]
+    """`count` different basic skills this hero doesn't know yet, at random:
+    the first from either path, the next from the path not offered yet, so
+    both playstyles stay open."""
+    left = [name for name in member.job.skills if name not in member.actions]
+    offered = []
+    while len(offered) < count and left:
+        paths = {member.job.path_of(name) for name in offered}
+        fresh = [name for name in left if member.job.path_of(name) not in paths]
+        pool = fresh or left
+        name = pool[rng.randint(0, len(pool) - 1)]
+        left.remove(name)
+        offered.append(name)
+    return offered
+
+
+def skill_line(member, name):
+    """'Riposte (Guardian): Guard, and ...' for the terminal."""
+    path = member.job.path_of(name)
+    return f'{name}{f" ({path.name})" if path else ""}: {ACTIONS[name].description}'
 
 
 def choose_skill(member, rng=random, ask=input, count=3):
@@ -1555,9 +1860,10 @@ def choose_skill(member, rng=random, ask=input, count=3):
     else:
         narrate(member, 'You can learn a new skill:', '{name} can learn a new skill:')
     for name in options:
-        print(f'  {name}: {ACTIONS[name].description}')
+        print(f'  {skill_line(member, name)}')
     show('skills', job=member.job.name, who=member.name,
-         skills=[{'name': name, 'description': ACTIONS[name].description} for name in options])
+         skills=[{'name': name, 'description': ACTIONS[name].description,
+                  'path': member.job.path_of(name).name} for name in options])
     by_name = {name.lower(): name for name in options}
     who = '' if member.hero else f'{member.name}: '
     while True:
@@ -1614,8 +1920,8 @@ def prisoner(job_key, stage_index, level=1, rng=random):
             equip(member, slot, gear[0])
     member.level, member.xp = level, LEVEL_XP[level - 1]
     member.health, member.mana = member.max_health, member.max_mana
-    for _ in range(1 + sum(1 for skill_level in SKILL_LEVELS if level >= skill_level)):
-        member.actions += offer_skills(member, 1, rng)
+    member.actions += offer_skills(
+        member, 1 + sum(1 for skill_level in SKILL_LEVELS if level >= skill_level), rng)
     return member
 
 
@@ -1663,7 +1969,7 @@ def boss_reward(party, stage_index, rng=random, ask=input):
     narrate(leader, f'Or you could leave them and keep the hoard: [{boon.name}] ({boon.describe()})',
             f'Or {{name}} could keep the hoard: [{boon.name}] ({boon.describe()})')
     for ability in abilities:
-        print(f'  plus the Boon Ability {ability}: {ACTIONS[ability].description}')
+        print(f'  plus the Boon Ability {skill_line(leader, ability)}')
     show('recruit', prisoners=[{**hero_view(member), **job_view(member.job),
                                 'name': member.name, 'job': member.job.name,
                                 'skills': [name for name in member.actions
@@ -1671,7 +1977,8 @@ def boss_reward(party, stage_index, rng=random, ask=input):
                                for member in prisoners],
          boon={'name': boon.name, 'describe': boon.describe(), 'for': leader.name,
                'job': leader.job.name},
-         abilities=[{'name': name, 'description': ACTIONS[name].description}
+         abilities=[{'name': name, 'description': ACTIONS[name].description,
+                     'path': leader.job.path_of(name).name}
                     for name in abilities])
 
     recruits = {member.name.lower(): member for member in prisoners}

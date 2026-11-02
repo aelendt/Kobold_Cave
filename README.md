@@ -7,52 +7,79 @@ Kobold Mines: the Upper Mines, the Deep Warrens and the Hoard. Each ends with a
 boss: the Kobold Leader, the Kobold Warchief, and finally Cinderjaw the Red,
 the dragon the kobolds serve.
 
-Each class carries different gear, finds loot to match, and has its own
-moves. Every run you're offered 3 of your class's 5 skills and pick 1, so no
-two runs play quite the same. Keeping a boss's hoard teaches a Boon Ability:
-a powerful move with a longer cooldown. Boon Abilities take time to gather:
+Each class carries different gear, finds loot to match, and has two paths:
+playstyles, each with five skills and a Boon Ability of its own. You aren't
+locked into one. Every run starts with a choice of 3 skills, and levels 2, 3,
+4, 5 and 6 each offer 2 more, always one from each path, so you can
+specialise or mix. A full run reaches about level 6, knowing 6 of the class's
+10 skills. Keeping a boss's hoard teaches a Boon Ability (either path's): a
+powerful move with a longer cooldown. Boon Abilities take time to gather:
 none can be used in the first two rounds of a fight, so they can't open every
 battle.
 
 Slain kobolds give the party experience. Each level raises your stats (but
-heals nothing; that's what bandages are for), and levels 2 and 4 each offer a
-choice of 2 new basic skills, so every hero ends a run knowing 3 of their 5.
-A full run reaches about level 6.
+heals nothing; that's what bandages are for).
 
-| Class   | Gear           | Signature  | Skills (start with 1 of 3)                                         | Boon Abilities          |
-|---------|----------------|------------|--------------------------------------------------------------------|-------------------------|
-| Warrior | Sword & shield | (none)     | Cleave, Shield Bash, Shield Wall, Second Wind, Battle Cry          | Execute, Last Stand     |
-| Rogue   | Two swords     | Flee       | Stunning Strike, Poison Blade, Smoke Bomb, Twin Strike, Pickpocket | Backstab, Assassinate   |
-| Wizard  | Staff & shield | Mana Surge | Fireball, Mend, Frost Bolt, Arcane Shield, Drain Life              | Meteor, Time Stop       |
+| Class   | Gear           | Signature  | Paths                  |
+|---------|----------------|------------|------------------------|
+| Warrior | Sword & shield | (none)     | Guardian, Berserker    |
+| Rogue   | Two swords     | Flee       | Assassin, Trickster    |
+| Wizard  | Staff & shield | Mana Surge | Pyromancer, Warden     |
 
-**Warrior**
-- **Cleave**: 1.5x damage. Every 3 rounds.
+**Warrior: Guardian** (protect the party, punish whoever hits you)
 - **Shield Bash**: half damage, and stuns. Every 3 rounds.
 - **Shield Wall**: guard, and draw every strike to you this round. Every 2 rounds.
+- **Riposte**: guard, and turn any blow at you back for 1.5x damage this round. Every 3 rounds.
+- **Fortify**: the whole party takes 25% less damage this round and next. Every 4 rounds.
 - **Second Wind**: recover 25% of your max HP. Once per fight.
-- **Battle Cry**: the whole party hits 50% harder this round and next. Every 3 rounds.
-- **Execute** (Boon): a blow that adds a third of the damage the enemy has already taken. Every 4 rounds.
 - **Last Stand** (Boon): nothing can drop you below 1 HP for two rounds. Once per fight.
 
-**Rogue**
-- **Flee** (signature): get the whole party away. Not from bosses.
+**Warrior: Berserker** (hit harder the more it hurts)
+- **Cleave**: 1.5x damage. Every 3 rounds.
+- **Battle Cry**: the whole party hits 50% harder this round and next. Every 3 rounds.
+- **Reckless Swing**: double damage, but you take 25% more until your next turn. Every 2 rounds.
+- **Bloodlust**: a blow, then for 3 rounds your blows heal you for a quarter of their damage. Every 5 rounds.
+- **Rampage**: a blow that grows with your wounds, up to double at death's door. Every 3 rounds.
+- **Execute** (Boon): a blow that adds a third of the damage the enemy has already taken. Every 4 rounds.
+
+**Rogue** has the signature **Flee**: get the whole party away. Not from bosses.
+
+**Rogue: Assassin** (mark a target, then end it in one huge blow)
+- **Twin Strike**: two quick hits at 0.75x. Every 2 rounds.
+- **Mark for Death**: a light cut; the party deals 30% more to the enemy for 3 turns. Every 4 rounds.
+- **Shadowstep**: vanish this round (nothing can hit you), and your next blow does double. Every 3 rounds.
+- **Ambush**: double damage, in the first round of a fight only.
+- **Eviscerate**: 50% more damage for each thing wrong with the enemy (stunned, poisoned, marked, burning, chilled, silenced). Every 3 rounds.
+- **Assassinate** (Boon): triple damage against an enemy below 30% health. Every 4 rounds.
+
+**Rogue: Trickster** (stuns, poison and dirty tricks)
 - **Stunning Strike**: a hit that makes the enemy lose its next turn. Every 3 rounds.
 - **Poison Blade**: a hit that poisons the enemy for 3 rounds. Every 4 rounds.
 - **Smoke Bomb**: every enemy strike misses this round. Every 3 rounds.
-- **Twin Strike**: two quick hits at 0.75x. Every 2 rounds.
+- **Garrote**: a light hit, and for 2 turns the enemy can only swing: no abilities, no big moves, and it drops any it was winding up. Every 4 rounds.
 - **Pickpocket**: a normal hit that also steals a roll of bandages. Once per fight.
 - **Backstab** (Boon): double damage, quadruple against a stunned enemy. Every 4 rounds.
-- **Assassinate** (Boon): triple damage against an enemy below 30% health. Every 4 rounds.
 
-**Wizard**
-- **Mana Surge** (signature): regain 2 mana, guarding as you do (like Defend). Every 3 rounds.
+**Wizard** has the signature **Mana Surge**: regain 2 mana, guarding as you do (like Defend). Every 3 rounds.
+
+**Wizard: Pyromancer** (set it alight, keep it burning, then make it blow)
 - **Fireball** (1 mana): heavy damage, but it sometimes misses or misfires.
-- **Mend** (1 mana): heal yourself or an ally.
-- **Frost Bolt** (1 mana): never misses, and may freeze the enemy in place.
-- **Arcane Shield** (1 mana): the party takes half damage this round, and the shield burns the enemy. Every 2 rounds.
+- **Ignite** (1 mana): the enemy burns for a quarter of your spell power a turn, for 3 turns.
+- **Scorch** (1 mana): 0.6x spell power, double against a burning enemy.
+- **Combustion** (1 mana): set off a burning enemy's flames: all the burn still to come, at once, plus half again. Every 3 rounds.
 - **Drain Life** (1 mana): damage the enemy and heal yourself for half of it.
 - **Meteor** (Boon, 2 mana): double spell power, guaranteed. Every 3 rounds.
+
+**Wizard: Warden** (freeze the enemy, shield the party)
+- **Frost Bolt** (1 mana): never misses, and may freeze the enemy in place.
+- **Arcane Shield** (1 mana): the party takes half damage this round, and the shield burns the enemy. Every 2 rounds.
+- **Mend** (1 mana): heal yourself or an ally.
+- **Ice Armor** (1 mana): you or an ally take 40% less damage for 3 rounds. Every 3 rounds.
+- **Frost Nova** (2 mana): light damage, the enemy hits 25% softer for 3 turns, and it may freeze. Every 3 rounds.
 - **Time Stop** (Boon, 3 mana): the enemy loses its next 2 turns, bosses included. Once per fight.
+
+Freed prisoners join knowing the skills their level would have taught, from
+both paths.
 
 Stuns make the enemy lose a turn; bosses shake off half of them. Staves add
 spell power or mana.
@@ -282,4 +309,5 @@ and after a change rather than reading the numbers as a person's odds.
 python3 balance_bot.py                        # 200 runs of each class
 python3 balance_bot.py --runs 1000 --hoard    # keep every hoard, so play alone
 python3 balance_bot.py --job wizard
+python3 balance_bot.py --path 2               # favour each class's second path
 ```

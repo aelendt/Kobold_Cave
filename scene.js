@@ -144,7 +144,7 @@ function enemySide(enemy, scene) {
 
 function jobCards(jobs, pick) {
   const most = stat => Math.max(...jobs.map(job => job[stat]));
-  const grid = element('div', 'jobs');
+  const grid = element('div', 'jobs classes');
   jobs.forEach((job, i) => {
     const card = element('button', 'job');
     card.type = 'button';
@@ -160,10 +160,16 @@ function jobCards(jobs, pick) {
                  element('span', 'nums', String(job[stat])));
       card.append(row);
     }
-    card.append(element('div', 'what', job.special ? `Signature: ${job.special}` : 'No signature move'),
-                element('div', 'what', `Skills: 1 of ${job.skills.join(', ')}`),
-                element('div', 'what lesson', `Boons: ${job.boon_abilities.join(', ')}`),
-                element('div', 'what', job.gear.join(' & ')));
+    card.append(element('div', 'what', job.special ? `Signature: ${job.special}` : 'No signature move'));
+    // Two playstyles: each path's skills, and the Boon Ability it leads to.
+    job.paths.forEach(path => {
+      const box = element('div', 'path-note');
+      box.append(element('div', 'path-name', path.name), element('div', 'what', path.blurb),
+                 element('div', 'what', path.skills.join(', ')),
+                 element('div', 'what lesson', `Boon: ${path.boon}`));
+      card.append(box);
+    });
+    card.append(element('div', 'what', job.gear.join(' & ')));
     grid.append(card);
   });
   return grid;
@@ -189,7 +195,8 @@ function choiceCard(spriteName, number, title, lines, onPick, extraClass = '') {
 function skillCards({ job, skills }, pick) {
   const grid = element('div', 'jobs');
   skills.forEach((skill, i) => grid.append(
-    choiceCard(job.toLowerCase(), i + 1, skill.name, [[skill.description]], () => pick(skill.name))));
+    choiceCard(job.toLowerCase(), i + 1, skill.name, [[skill.path, 'what path-name'], [skill.description]],
+               () => pick(skill.name))));
   return grid;
 }
 
@@ -202,7 +209,8 @@ function recruitCards({ prisoners, boon, abilities }, pick) {
     () => pick(prisoner.name))));
   abilities.forEach((ability, i) => grid.append(choiceCard(
     'chest', prisoners.length + i + 1, ability.name,
-    [[ability.description, 'what lesson'], [`${boon.name} for ${boon.for}: ${boon.describe}`]],
+    [[ability.path, 'what path-name'], [ability.description, 'what lesson'],
+     [`${boon.name} for ${boon.for}: ${boon.describe}`]],
     () => pick(ability.name), 'boon')));
   return grid;
 }

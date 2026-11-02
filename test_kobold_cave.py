@@ -132,12 +132,17 @@ class TableTests(unittest.TestCase):
         self.assertEqual(game.BESTIARY['kobold_miner'].health, full)
         self.assertEqual(monster.max_health, full)
 
-    def test_every_skill_exists_and_each_class_has_five_plus_two(self):
+    def test_each_class_has_two_paths_of_five_skills_and_a_boon(self):
+        names = []
         for job in game.JOBS.values():
-            self.assertEqual(len(job.skills), 5, job.name)
-            self.assertEqual(len(job.boon_abilities), 2, job.name)
-            for name in job.actions + job.skills + job.boon_abilities:
-                self.assertIn(name, game.ACTIONS)
+            self.assertEqual(len(job.paths), 2, job.name)
+            for path in job.paths:
+                self.assertEqual(len(path.skills), 5, path.name)
+                for name in path.skills + (path.boon,):
+                    self.assertIn(name, game.ACTIONS)
+                    self.assertIs(job.path_of(name), path)
+            names += job.actions + job.skills + job.boon_abilities
+        self.assertEqual(len(names), len(set(names)))  # no skill on two paths
 
 
 class EquipmentTests(unittest.TestCase):
@@ -540,22 +545,25 @@ class StartingSkillTests(unittest.TestCase):
 
     def test_you_pick_one_of_three_different_skills(self):
         wizard = hero('wizard')
-        # pops from the pool of five: index 0, then 3 of the four left, then 1 of three
-        _, out = captured(game.choose_skill, wizard, FakeRng(0, 3, 1), answers('mend', 'drain life'))
-        self.assertIn('Fireball', out)
-        self.assertIn('Drain Life', out)
-        self.assertIn('Frost Bolt', out)
-        self.assertNotIn('Mend:', out)
-        self.assertEqual(wizard.actions, ['Mana Surge', 'Drain Life'])
+        # the first of all ten (Fireball, a Pyromancer skill); the fourth Warden skill
+        # (Ice Armor); then the second of the eight left, from either path (Scorch)
+        _, out = captured(game.choose_skill, wizard, FakeRng(0, 3, 1), answers('mend', 'scorch'))
+        self.assertIn('Fireball (Pyromancer):', out)
+        self.assertIn('Ice Armor (Warden):', out)
+        self.assertIn('Scorch (Pyromancer):', out)
+        self.assertNotIn('Mend (', out)
+        self.assertEqual(wizard.actions, ['Mana Surge', 'Scorch'])
 
     def test_prisoners_come_with_a_random_skill(self):
-        recruit = game.prisoner('warrior', 0, 1, FakeRng(4))
-        self.assertEqual(recruit.actions, ['Battle Cry'])
+        recruit = game.prisoner('warrior', 0, 1, FakeRng(5))  # the first Berserker skill
+        self.assertEqual(recruit.actions, ['Cleave'])
 
     def test_higher_level_prisoners_know_more_skills(self):
-        recruit = game.prisoner('rogue', 0, 4, FakeRng(0, 0, 0))
+        # one to start and one for each of levels 2, 3 and 4, from both paths in turn
+        recruit = game.prisoner('rogue', 0, 4, FakeRng(0, 0, 0, 0))
         self.assertEqual(recruit.level, 4)
-        self.assertEqual(recruit.actions, ['Flee', 'Stunning Strike', 'Poison Blade', 'Smoke Bomb'])
+        self.assertEqual(recruit.actions, ['Flee', 'Twin Strike', 'Stunning Strike',
+                                           'Mark for Death', 'Shadowstep'])
         self.assertEqual(recruit.health, recruit.max_health)
 
 
@@ -755,6 +763,148 @@ class WizardSkillTests(unittest.TestCase):
         self.assertEqual(wizard.health, 130)
 
 
+class PathSkillTests(unittest.TestCase):
+    """The skills each path added, a class at a time."""
+
+    # Guardian and Berserker
+
+    def test_riposte_turns_a_blow_back(self):
+        warrior, monster = hero(skills=['Riposte']), kobold(health=100, attack=20)
+        party = party_of(warrior)
+        turn(warrior, party, monster, [], 'riposte')
+        quietly(game.monster_strikes, warrior, monster, FakeRng(0))
+        self.assertEqual((warrior.health, monster.health), (150, 100 - round(15 * 1.5)))
+        game.end_round(party)
+        self.assertFalse(warrior.riposte)
+
+    def test_fortify_softens_blows_on_the_whole_party(self):
+        warrior, rogue = hero(skills=['Fortify']), companion()
+        party, monster = party_of(warrior, rogue), kobold(attack=20)
+        turn(warrior, party, monster, [], 'fortify')
+        quietly(game.monster_strikes, rogue, monster, FakeRng(0, -2))  # no dodge
+        self.assertEqual(rogue.health, 120 - 15)
+
+    def test_reckless_swing_hits_double_and_leaves_you_open(self):
+        warrior, monster = hero(skills=['Reckless Swing']), kobold(health=100, attack=20)
+        turn(warrior, party_of(warrior), monster, [0], 'reckless swing')
+        self.assertEqual(monster.health, 100 - 30)
+        quietly(game.monster_strikes, warrior, monster, FakeRng(0, -2))
+        self.assertEqual(warrior.health, 150 - 25)
+
+    def test_bloodlust_heals_from_blows(self):
+        warrior, monster = hero(skills=['Bloodlust']), kobold(health=100)
+        warrior.health = 100
+        turn(warrior, party_of(warrior), monster, [0], 'bloodlust')
+        self.assertEqual((monster.health, warrior.health, warrior.bloodlust), (85, 104, 3))
+
+    def test_rampage_grows_with_your_wounds(self):
+        warrior, monster = hero(skills=['Rampage']), kobold(health=100)
+        warrior.health = 75  # half gone: one and a half times the damage
+        turn(warrior, party_of(warrior), monster, [0], 'rampage')
+        self.assertEqual(monster.health, 100 - round(15 * 1.5))
+
+    # Assassin and Trickster
+
+    def test_mark_for_death_makes_the_party_hit_harder(self):
+        rogue, monster = hero('rogue', skills=['Mark for Death']), kobold(health=100)
+        party = party_of(rogue)
+        turn(rogue, party, monster, [0], 'mark for death')
+        self.assertEqual((monster.health, monster.marked), (100 - 6, 3))
+        game.end_round(party)
+        turn(rogue, party, monster, [0], 'attack')
+        self.assertEqual(monster.health, 100 - 6 - round(12 * 1.3))
+
+    def test_shadowstep_hides_you_and_doubles_the_next_blow(self):
+        rogue, monster = hero('rogue', skills=['Shadowstep']), kobold(health=100, attack=20)
+        party = party_of(rogue)
+        turn(rogue, party, monster, [], 'shadowstep')
+        _, out = captured(game.monster_strikes, game.target_of(party, FakeRng()), monster,
+                          FakeRng(0))
+        self.assertIn('swings at shadows', out)
+        self.assertEqual(rogue.health, 120)
+        game.end_round(party)
+        self.assertFalse(rogue.hidden)
+        turn(rogue, party, monster, [0], 'attack')
+        self.assertEqual(monster.health, 100 - 24)
+        self.assertFalse(rogue.primed)
+
+    def test_ambush_only_in_the_first_round(self):
+        rogue, monster = hero('rogue', skills=['Ambush']), kobold(health=100)
+        monster.rounds = 1
+        turn(rogue, party_of(rogue), monster, [0], 'ambush')
+        self.assertEqual(monster.health, 100 - 24)
+        rogue, monster = hero('rogue', skills=['Ambush']), kobold(health=100)
+        monster.rounds = 2
+        _, out = captured(game.take_turn, rogue, party_of(rogue), monster, FakeRng(0),
+                          answers('ambush', 'attack'))
+        self.assertIn('Too late for an ambush', out)
+        self.assertEqual(monster.health, 100 - 12)
+
+    def test_eviscerate_feeds_on_every_affliction(self):
+        rogue, monster = hero('rogue', skills=['Eviscerate']), kobold(health=100)
+        monster.stunned, monster.poison_rounds = 1, 2
+        turn(rogue, party_of(rogue), monster, [0], 'eviscerate')
+        self.assertEqual(monster.health, 100 - 12 * 2)
+
+    def test_garrote_stops_abilities_and_big_moves(self):
+        rogue = hero('rogue', skills=['Garrote'])
+        monster = kobold(health=100, attack=20, abilities=('Rock Toss',))
+        monster.charging = 'Crushing Blow'
+        party = party_of(rogue)
+        turn(rogue, party, monster, [0], 'garrote')
+        self.assertEqual((monster.silenced, monster.charging), (2, ''))
+        # no ability roll: straight to a swing (damage, dodge)
+        _, out = captured(game.monster_turn, party, monster, 1, FakeRng(0, -2))
+        self.assertNotIn('rock', out)
+        self.assertIn('You are struck for 20 damage', out)
+        self.assertEqual(monster.silenced, 1)
+
+    # Pyromancer and Warden
+
+    def test_ignite_burns_every_turn(self):
+        wizard, monster = hero('wizard', skills=['Ignite']), kobold(health=100)
+        party = party_of(wizard)
+        turn(wizard, party, monster, [], 'ignite')
+        self.assertEqual((monster.burn, monster.burn_rounds, wizard.mana), (15, 3, 4))
+        monster.stunned = 1  # so its turn is only the burning
+        quietly(game.monster_turn, party, monster, 1, FakeRng())
+        self.assertEqual((monster.health, monster.burn_rounds), (85, 2))
+
+    def test_scorch_does_double_to_a_burning_enemy(self):
+        wizard, monster = hero('wizard', skills=['Scorch']), kobold(health=200)
+        party = party_of(wizard)
+        turn(wizard, party, monster, [], 'scorch')
+        self.assertEqual(monster.health, 200 - 36)
+        monster.burn_rounds = 1
+        turn(wizard, party, monster, [], 'scorch')
+        self.assertEqual(monster.health, 200 - 36 - 72)
+
+    def test_combustion_sets_off_the_burn_all_at_once(self):
+        wizard, monster = hero('wizard', skills=['Combustion']), kobold(health=200)
+        _, out = captured(game.take_turn, wizard, party_of(wizard), monster, FakeRng(0),
+                          answers('combustion', 'attack'))
+        self.assertIn('is not burning', out)
+        monster.burn, monster.burn_rounds = 15, 3
+        game.end_round(party_of(wizard))
+        turn(wizard, party_of(wizard), monster, [], 'combustion')
+        self.assertEqual((monster.burn_rounds, monster.health), (0, 200 - 10 - round(45 * 1.5)))
+
+    def test_ice_armor_softens_blows(self):
+        wizard, rogue = hero('wizard', skills=['Ice Armor']), companion()
+        party, monster = party_of(wizard, rogue), kobold(attack=20)
+        turn(wizard, party, monster, [], 'ice armor', 'mira')
+        self.assertEqual(rogue.ice_armor, 3)
+        quietly(game.monster_strikes, rogue, monster, FakeRng(0, -2))
+        self.assertEqual(rogue.health, 120 - 12)
+
+    def test_frost_nova_freezes_and_chills(self):
+        wizard, monster = hero('wizard', skills=['Frost Nova']), kobold(health=100, attack=20)
+        turn(wizard, party_of(wizard), monster, [], 'frost nova')
+        self.assertEqual((monster.health, monster.stunned, monster.chilled, wizard.mana),
+                         (100 - 18, 1, 3, 3))
+        self.assertEqual(game.monster_damage(monster, FakeRng(0)), 15)
+
+
 class MonsterAbilityTests(unittest.TestCase):
     def test_every_monster_ability_exists(self):
         for monster in game.BESTIARY.values():
@@ -889,7 +1039,7 @@ class ExperienceTests(unittest.TestCase):
         self.assertEqual(warrior.max_health, 150 + growth.max_health)
         self.assertEqual(warrior.health, 100 + growth.max_health)  # still just as wounded
 
-    def test_levels_two_and_four_offer_two_new_skills(self):
+    def test_levels_two_to_six_each_offer_a_skill_from_each_path(self):
         warrior = hero(skills=['Cleave'])
         prompts = []
         def ask(prompt):
@@ -898,10 +1048,13 @@ class ExperienceTests(unittest.TestCase):
         quietly(game.award_xp, party_of(warrior), kobold(xp=game.LEVEL_XP[-1]),
                 FakeRng(*[0] * 10), ask)
         self.assertEqual(warrior.level, len(game.LEVEL_XP))
-        self.assertEqual(len(prompts), 2)
-        self.assertTrue(all(prompt.count(' / ') == 1 for prompt in prompts))  # 2 options each
+        self.assertEqual(len(prompts), len(game.SKILL_LEVELS))
+        for prompt in prompts:
+            options = prompt[prompt.index('[') + 1:prompt.index(']')].split(' / ')
+            paths = {warrior.job.path_of(name).name for name in options}
+            self.assertEqual(paths, {'Guardian', 'Berserker'}, prompt)
         basics = [name for name in warrior.actions if name in warrior.job.skills]
-        self.assertEqual(len(basics), 3)  # every hero ends with three basic skills
+        self.assertEqual(len(basics), 1 + len(game.SKILL_LEVELS))
 
     def test_wizards_gain_mana_every_other_level(self):
         wizard = hero('wizard')
@@ -916,8 +1069,10 @@ class ExperienceTests(unittest.TestCase):
         def ask(prompt):
             prompts.append(prompt)
             return 'smoke bomb'
-        quietly(game.award_xp, party_of(warrior, rogue), kobold(xp=10), FakeRng(1, 1), ask)
-        self.assertTrue(prompts[0].startswith('Mira: Which skill?'))
+        # the first offer is any skill Mira doesn't know (Mark for Death, an Assassin
+        # one), the second one from the other path (the Trickster's Smoke Bomb)
+        quietly(game.award_xp, party_of(warrior, rogue), kobold(xp=10), FakeRng(0, 2), ask)
+        self.assertTrue(prompts[0].startswith('Mira: Which skill? [Mark for Death / Smoke Bomb]'))
         self.assertIn('Smoke Bomb', rogue.actions)
 
 
@@ -974,9 +1129,9 @@ class RewardTests(unittest.TestCase):
             prompts.append(prompt)
             return 'vex'
         party = party_of(warrior)
-        quietly(game.boss_reward, party, 1, FakeRng(1, 1, 0, 0, 0), ask)
+        quietly(game.boss_reward, party, 1, FakeRng(1, 1, 0, 0, 0, 0, 0), ask)
         self.assertEqual(prompts, ['Free the prisoner, or keep the hoard? '
-                                   '[Vex / Execute / Last Stand] '])
+                                   '[Vex / Last Stand / Execute] '])
         self.assertEqual(party.members[1].level, 4)
 
     def test_a_full_party_gets_nothing_extra(self):
@@ -1388,7 +1543,8 @@ class ShowHookTests(unittest.TestCase):
         self.assertIn('skills', scenes)
         recruit = json.loads(scenes['recruit'])
         self.assertEqual([p['name'] for p in recruit['prisoners']], ['Brann'])
-        self.assertEqual([a['name'] for a in recruit['abilities']], ['Execute', 'Last Stand'])
+        self.assertEqual([(a['name'], a['path']) for a in recruit['abilities']],
+                         [('Last Stand', 'Guardian'), ('Execute', 'Berserker')])
 
     def test_panel_data_covers_stats_gear_skills_and_the_journey(self):
         wizard = hero('wizard', skills=['Fireball', 'Meteor'])

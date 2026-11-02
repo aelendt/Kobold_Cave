@@ -512,6 +512,8 @@ form { display: flex; gap: 0.5rem; }
 .party.size-3 .what { display: none; }
 .supplies { font-size: 0.75rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--dust-dim); }
 .jobs.recruits { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+button.job .path-note { display: flex; flex-direction: column; gap: 0.1rem; padding-top: 0.3rem; border-top: 1px solid var(--seam); }
+button.job .path-name, .path-name { color: var(--lantern); font-weight: 700; font-size: 0.78rem; letter-spacing: 0.04em; }
 button.job .side { letter-spacing: 0.08em; text-transform: uppercase; font-size: 0.68rem; }
 button.job.way.fight .side, button.job.way.lair .side { color: var(--blood); }
 button.job.way.lair { border-color: rgba(224, 98, 90, 0.6); }
@@ -640,6 +642,10 @@ button.drawer-close { padding: 0.4rem 0.7rem; font-size: 0.8rem; }
   button.job { padding: 0.5rem; }
   button.job .portrait { width: 3.5rem; height: 3.5rem; }
   .jobs.recruits { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* The class cards carry two paths each: one wide card per class reads better. */
+  .jobs.classes { grid-template-columns: 1fr; }
+  .jobs.classes .stat-row { grid-template-columns: 2.2rem 1fr 1.8rem; }
+  .jobs.classes .stat-row .nums { display: block; }
   .enemy .what { display: none; }
   .nums { min-width: 0; }
   .fighter.big .portrait { width: 5rem; height: 5rem; }
